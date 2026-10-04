@@ -1,0 +1,15 @@
+# PostgreSQL for integration tests.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: queryio-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "54329:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

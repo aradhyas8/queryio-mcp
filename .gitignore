@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.tgz
+
+# Private planning and benchmark material (kept locally, not published)
+.scratch/
+SPEC.md
+fixture/
