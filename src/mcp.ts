@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { Core } from "./core.js";
 import { toQueryError } from "./errors.js";
@@ -24,15 +25,40 @@ export function createServer(core: Core): McpServer {
         duration_ms: z.number(),
       },
     },
-    async ({ sql }) => {
-      try {
-        const result = await core.query(sql);
-        return { structuredContent: { ...result }, content: [{ type: "text", text: JSON.stringify(result) }] };
-      } catch (err) {
-        return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: toQueryError(err) }) }] };
-      }
+    ({ sql }) => respond(core.query(sql)),
+  );
+
+  server.registerTool(
+    "list_tables",
+    {
+      description:
+        "List tables outside system schemas: schema-qualified name, estimated_rows (planner estimate, null if never analyzed; no scans), and column count. Optional filter: case-insensitive substring matched against table and column names.",
+      inputSchema: { filter: z.string().optional().describe("Substring of a table or column name") },
     },
+    ({ filter }) => respond(core.listTables(filter)),
+  );
+
+  server.registerTool(
+    "describe_tables",
+    {
+      description:
+        "Describe several tables in one call: columns (name, type, nullable), primary key, outgoing and incoming foreign keys (constraint, from_table/from_columns, to_table/to_columns, paired by position), and indexes. Unknown tables get a per-table error; the rest still succeed.",
+      inputSchema: {
+        tables: z.array(z.string()).min(1).describe("Schema-qualified table names, e.g. public.users"),
+      },
+    },
+    ({ tables }) => respond(core.describeTables(tables)),
   );
 
   return server;
+}
+
+/** Shape a core result as structured plus compact text content, or a core failure as a structured tool error. */
+async function respond(work: Promise<object>): Promise<CallToolResult> {
+  try {
+    const result = await work;
+    return { structuredContent: { ...result }, content: [{ type: "text", text: JSON.stringify(result) }] };
+  } catch (err) {
+    return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: toQueryError(err) }) }] };
+  }
 }

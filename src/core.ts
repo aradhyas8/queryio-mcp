@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import Cursor from "pg-cursor";
 import { createAuditLog } from "./audit.js";
+import * as catalog from "./catalog.js";
 import { QueryError, toQueryError } from "./errors.js";
 import type { Settings } from "./settings.js";
 
@@ -19,8 +20,17 @@ export interface QueryResult {
   duration_ms: number;
 }
 
+export interface TableNotFound {
+  name: string;
+  error: QueryError;
+}
+
 export interface Core {
   query(sql: string): Promise<QueryResult>;
+  /** Tables outside system schemas; `filter` is a case-insensitive substring of a table or column name. */
+  listTables(filter?: string): Promise<{ tables: catalog.TableSummary[] }>;
+  /** Structure per requested schema-qualified name, in request order; unknown names get a per-table error. */
+  describeTables(tables: string[]): Promise<{ tables: (catalog.TableStructure | TableNotFound)[] }>;
   close(): Promise<void>;
 }
 
@@ -194,6 +204,39 @@ export function createCore(settings: Settings): Core {
           has_more: result.has_more,
           truncated_by: result.truncated_by,
           values_truncated: result.values_truncated,
+        }),
+      );
+    },
+    listTables(filter) {
+      return audited(
+        "list_tables",
+        {},
+        async () => ({ tables: await readOnly((client) => catalog.listTables(client, filter)) }),
+        (result) => ({ tables_returned: result.tables.length, bytes_returned: Buffer.byteLength(JSON.stringify(result)) }),
+      );
+    },
+    describeTables(tables) {
+      return audited(
+        "describe_tables",
+        { tables },
+        async () => {
+          const found = await readOnly((client) => catalog.describeTables(client, tables));
+          return {
+            tables: tables.map(
+              (name) =>
+                found.get(name) ?? {
+                  name,
+                  error: new QueryError(
+                    "not_found",
+                    `Table ${JSON.stringify(name)} not found. Pass a schema-qualified name as list_tables returns it, e.g. public.users.`,
+                  ),
+                },
+            ),
+          };
+        },
+        (result) => ({
+          tables_failed: result.tables.filter((t) => "error" in t).length,
+          bytes_returned: Buffer.byteLength(JSON.stringify(result)),
         }),
       );
     },
