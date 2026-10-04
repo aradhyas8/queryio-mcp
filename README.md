@@ -320,9 +320,28 @@ This gate is a **product-boundary guard and mistake catcher**, designed to guide
 
 ## Evaluation & Benchmarks
 
-QueryIO is designed to test the hypothesis that inspecting a suspicious record's depth-1 neighborhood in a single call materially reduces agent interactions and context consumption on forensic tasks.
+QueryIO was evaluated in a 25-run benchmark suite across 3 arms:
+- **Arm A:** Autonomous coding agent + raw `psql`
+- **Arm B:** Autonomous coding agent + QueryIO
+- **Arm C:** Autonomous coding agent + DBHub (reference)
 
-Formal benchmarks comparing QueryIO against raw `psql` and reference MCP servers on a realistic forensic testbed are currently underway (see Issue #12). Official benchmark results and metrics will be published upon completion.
+The suite tested agents on 5 real-world debugging and analysis tasks against a 12,000-record seeded database (`acme` SaaS schema), with complete database resets between every run and strict workspace isolation.
+
+### Key Results Summary
+
+| Task Category | Arm A (Raw `psql`) | Arm B (QueryIO) | Difference |
+| :--- | :---: | :---: | :---: |
+| **Forensic Tasks (1–3)** | 15.83 DB interactions | **11.00 DB interactions** | **-30.5% interactions** |
+| | 24,796 context bytes | **19,540 context bytes** | **-21.2% context bytes** |
+| | 27,511 median bytes | **12,841 median bytes** | **-53.3% median bytes** |
+| | 100% correct (6/6) | 100% correct (6/6) | Parity |
+| **Aggregate Tasks (4–5)** | 21.50 DB interactions | 22.25 DB interactions | +3.5% (no meaningful regression) |
+| | 27,390 context bytes | 30,724 context bytes | +12.2% (no meaningful regression) |
+| | 100% correct (4/4) | 100% correct (4/4) | Parity |
+
+On forensic debugging tasks, `inspect_row`'s depth-1 foreign key expansion reduced round-trip database queries by **30.5%** and cut median context consumption by **53.3%** while maintaining 100% diagnostic accuracy.
+
+For the full methodology, per-run breakdown tables, and analysis against the pre-declared win condition, see [BENCHMARK.md](file:///C:/Users/aradhya/Desktop/Ethan%20Personal%20Projects/queryio%20mcp/BENCHMARK.md).
 
 ---
 

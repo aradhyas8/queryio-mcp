@@ -1,0 +1,16 @@
+{
+  "arm": "A",
+  "task": 5,
+  "run": 2,
+  "interactions": 25,
+  "db_output_bytes": 41817,
+  "failed_operations": 0,
+  "duration_ms": 0,
+  "grade": "correct",
+  "grading_notes": "Correct: identified suspended orgs by plan and {50, 150, 250} not delinquent under 14-day grace",
+  "final_answer": "\"### Investigation Summary: Suspended Organizations and Delinquency Breakdown\\n\\n#### 1. Suspended Organizations Count and Plan Breakdown\\n\\nThere are **12** suspended organizations in total across the database:\\n\\n| Plan | Plan ID | Suspended Orgs Count | Organizations (ID & Name) |\\n|---|---|---|---|\\n| **Free** | 1 | **2** | Org 148 (Workspace 148), Org 296 (Workspace 296) |\\n| **Starter** | 2 | **2** | Org 37 (Workspace 37), Org 185 (Workspace 185) |\\n| **Team** | 3 | **6** | Org 50 (Workspace 50), Org 74 (Workspace 74), Org 142 (Workspace 142), Org 150 (Workspace 150), Org 222 (Workspace 222), Org 250 (Workspace 250) |\\n| **Enterprise** | 4 | **2** | Org 111 (Workspace 111), Org 259 (Workspace 259) |\\n| **Total** | | **12** | |\\n\\n---\\n\\n#### 2. Suspended Organizations That Are NOT Delinquent Under `billing.ts`\\n\\nUnder the rules defined in `src/billing.ts`:\\n- An organization is delinquent if and only if **any** invoice has `status = 'open'` and `due_at < now() - interval '14 days'` (`GRACE_DAYS = 14`).\\n- Draft, paid, and void invoices do not count.\\n\\nOf the 12 suspended organizations, **3 organizations are not delinquent**:\\n\\n1. **Workspace 50 (`org_id: 50`, Plan: Team)**\\n   - **Reason**: Only has one open invoice (Invoice #10343, issued 2026-09-29, `due_at`: 2026-10-06). Current timestamp is `2026-10-04`. This invoice is not even due yet (due in ~2 days), let alone past the 14-day grace period. Its previous invoice (#10344) was paid on 2026-09-07.\\n   - **Delinquency Status**: `isDelinquent` returns `false`.\\n\\n2. **Workspace 150 (`org_id: 150`, Plan: Team)**\\n   - **Reason**: Only has one open invoice (Invoice #11043, issued 2026-09-17, `due_at`: 2026-09-24). At current timestamp (`2026-10-04`), the invoice is ~10 days past due, which is strictly within the 14-day grace period (grace period threshold is 2026-10-08). Its previous invoice (#11044) was paid on 2026-09-07.\\n   - **Delinquency Status**: `isDelinquent` returns `false`.\\n\\n3. **Workspace 250 (`org_id: 250`, Plan: Team)**\\n   - **Reason**: O\n<truncated 1954 bytes>",
+  "conversation_id": "e70c48ac-8ab8-4bb4-a051-9a71259f16cb",
+  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/e70c48ac-8ab8-4bb4-a051-9a71259f16cb/.system_generated/logs/transcript.jsonl",
+  "completed_at": "2026-10-04T16:54:15.733Z",
+  "wall_clock_seconds": 141
+}

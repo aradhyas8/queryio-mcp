@@ -6,3 +6,9 @@ dist/
 .scratch/
 SPEC.md
 fixture/
+
+# Agent runtime artifacts
+.agents/
+.claude/
+.hermes/
+skills-lock.json

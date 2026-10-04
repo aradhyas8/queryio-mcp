@@ -1,0 +1,13 @@
+{"ts":"2026-10-04T16:41:22.173Z","tool":"list_tables","duration_ms":292,"success":true,"tables_returned":14,"bytes_returned":919}
+{"ts":"2026-10-04T16:41:35.575Z","tool":"query","sql_hash":"58fc7a3ca1945ddc","duration_ms":284,"success":true,"rows_returned":4,"bytes_returned":315,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:41:42.265Z","tool":"query","sql_hash":"72682db535f493c7","duration_ms":281,"success":true,"rows_returned":1,"bytes_returned":170,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:41:45.694Z","tool":"query","sql_hash":"c4f9c20feb46de7d","duration_ms":296,"success":true,"rows_returned":1,"bytes_returned":167,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:41:53.197Z","tool":"query","sql_hash":"0a951ae7421d8e21","duration_ms":299,"success":true,"rows_returned":63,"bytes_returned":1832,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:41:56.317Z","tool":"query","sql_hash":"cbca5a827395cd50","duration_ms":289,"success":true,"rows_returned":2,"bytes_returned":215,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:41:59.964Z","tool":"query","sql_hash":"f5e7003842fad77e","duration_ms":287,"success":true,"rows_returned":10,"bytes_returned":442,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:04.300Z","tool":"query","sql_hash":"ba6e687d28c657c4","duration_ms":288,"success":true,"rows_returned":1,"bytes_returned":168,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:12.279Z","tool":"query","sql_hash":"b3b4bf17af73725e","duration_ms":289,"success":true,"rows_returned":12,"bytes_returned":858,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:18.949Z","tool":"query","sql_hash":"f529fc415dcae01e","duration_ms":282,"success":true,"rows_returned":0,"bytes_returned":177,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:22.905Z","tool":"query","sql_hash":"28a5eb9ca5d63969","duration_ms":285,"success":true,"rows_returned":1,"bytes_returned":168,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:25.296Z","tool":"query","sql_hash":"5d7ae290810733cf","duration_ms":287,"success":true,"rows_returned":6,"bytes_returned":326,"has_more":false,"truncated_by":null,"values_truncated":0}
+{"ts":"2026-10-04T16:42:27.889Z","tool":"query","sql_hash":"5a2be4c5bdd9c139","duration_ms":284,"success":true,"rows_returned":1,"bytes_returned":201,"has_more":false,"truncated_by":null,"values_truncated":0}
