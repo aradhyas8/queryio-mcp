@@ -30,7 +30,7 @@ export interface Relation {
   /** Referencing columns, paired by position with the referenced target_columns, whatever the direction. */
   source_columns: string[];
   target_columns: string[];
-  status: "ok";
+  status: "ok" | "timeout" | "error";
   /** The related table's primary key, or ctid (physical position) without one. Never recency. */
   order_by: string[];
   columns: string[];
@@ -39,11 +39,21 @@ export interface Relation {
   has_more: boolean;
 }
 
+export interface RelationNotAttempted {
+  direction: "outgoing" | "incoming";
+  table: string;
+  constraint: string;
+  source_columns: string[];
+  target_columns: string[];
+  reason: "max_relations" | "deadline";
+}
+
 export interface InspectRowResult {
   table: string;
   columns: string[];
   row: unknown[];
   relations: Relation[];
+  relations_not_attempted: RelationNotAttempted[];
   values_truncated: number;
   values_redacted: number;
   duration_ms: number;
@@ -227,12 +237,33 @@ export function createCore(settings: Settings): Core {
     return { row, cuts, hidden };
   }
 
+  const FLOOR_MS = 50;
+
   async function runInspectRow(table: string, key: Record<string, unknown>): Promise<InspectRowResult> {
     const started = performance.now();
     const limit = settings.inspectRelatedRows;
+    const deadlineMs = settings.inspectDeadlineMs;
+
+    function remainingBudget(): number {
+      return Math.round(deadlineMs - (performance.now() - started));
+    }
+
+    type FkItem = { direction: "outgoing" | "incoming"; fk: catalog.ForeignKey; related: catalog.TableId };
+
     return await readOnly(async (client) => {
+      const preparePreRootStatement = async () => {
+        const remaining = remainingBudget();
+        if (remaining < FLOOR_MS) {
+          throw new QueryError("timeout", "inspect_row total deadline exceeded before root row was obtained", "57014");
+        }
+        await client.query(`SET LOCAL statement_timeout = ${Math.min(settings.statementTimeoutMs, remaining)}`);
+      };
+
+      await preparePreRootStatement();
       const rootId = (await catalog.resolveTables(client, [table])).get(table);
       if (!rootId) throw tableNotFound(table);
+
+      await preparePreRootStatement();
       const root = (await catalog.describeTables(client, [rootId])).get(rootId.oid)!;
       const pk = root.primary_key;
       if (!pk) throw new QueryError("no_primary_key", "inspect_row requires a declared primary key; use query for this table");
@@ -244,15 +275,19 @@ export function createCore(settings: Settings): Core {
         );
       }
 
-      const fks = [
+      const fks: FkItem[] = [
         ...root.foreign_keys_out.map((fk) => ({ direction: "outgoing" as const, fk, related: fk.to })),
         ...root.foreign_keys_in.map((fk) => ({ direction: "incoming" as const, fk, related: fk.from })),
       ];
-      const relatedIds = [...new Map(fks.map((f) => [f.related.oid, f.related])).values()].filter((id) => id.oid !== rootId.oid);
-      const structures = new Map([[rootId.oid, root], ...(await catalog.describeTables(client, relatedIds))]);
+      const maxRelations = settings.inspectMaxRelations;
+      const attemptedFks = fks.slice(0, maxRelations);
+      const cappedFks = fks.slice(maxRelations);
+
       // Every identifier in generated SQL comes from the catalog; every value is a bind parameter.
       const from = (id: catalog.TableId) => `${ident(id.schema)}.${ident(id.table)}`;
       const where = (columns: string[]) => columns.map((c, i) => `${ident(c)} = $${i + 1}`).join(" AND ");
+
+      await preparePreRootStatement();
 
       // Fetched as raw text, so FK lookups bind exactly what Postgres printed; parsed for output as query does.
       const found = await client.query<unknown[]>({
@@ -283,46 +318,110 @@ export function createCore(settings: Settings): Core {
       };
 
       const relations: Relation[] = [];
-      for (const { direction, fk, related } of fks) {
-        // Match the related table's side of the constraint against the root row's side.
-        const [match, rootColumns] = direction === "outgoing" ? [fk.to_columns, fk.from_columns] : [fk.from_columns, fk.to_columns];
-        const values = rootColumns.map((c) => text.get(c) ?? null);
-        // Without a primary key, physical position: stable within the snapshot, not across writes.
-        const orderBy = structures.get(related.oid)?.primary_key ?? ["ctid"];
-        const entry: Relation = {
-          direction,
-          table: catalog.qualifiedName(related.schema, related.table),
-          constraint: fk.constraint,
-          source_columns: fk.from_columns,
-          target_columns: fk.to_columns,
-          status: "ok",
-          order_by: orderBy,
-          columns: [],
-          rows: [],
-          rows_returned: 0,
-          has_more: false,
-        };
-        relations.push(entry);
-        // A NULL in the key references nothing, as the FK itself treats it.
-        if (values.includes(null)) continue;
-        // N + 1 rows: the extra one only proves has_more. No COUNT(*).
-        const result = await client.query<unknown[]>({
-          text: `SELECT * FROM ${from(related)} WHERE ${where(match)}
-                 ORDER BY ${orderBy.map(ident).join(", ")} LIMIT ${limit + 1}`,
-          values,
-          rowMode: "array",
-        });
-        entry.columns = result.fields.map((f) => f.name);
-        entry.rows = shape(result.fields, result.rows.slice(0, limit));
-        entry.rows_returned = entry.rows.length;
-        entry.has_more = result.rows.length > limit;
+      const relations_not_attempted: RelationNotAttempted[] = [];
+
+      const recordUnattempted = (list: FkItem[], reason: "max_relations" | "deadline") => {
+        for (const unattempted of list) {
+          relations_not_attempted.push({
+            direction: unattempted.direction,
+            table: catalog.qualifiedName(unattempted.related.schema, unattempted.related.table),
+            constraint: unattempted.fk.constraint,
+            source_columns: unattempted.fk.from_columns,
+            target_columns: unattempted.fk.to_columns,
+            reason,
+          });
+        }
+      };
+
+      const relatedIds = [...new Map(attemptedFks.map((f) => [f.related.oid, f.related])).values()].filter(
+        (id) => id.oid !== rootId.oid,
+      );
+      let pks = new Map<number, string[]>([[rootId.oid, pk]]);
+      if (relatedIds.length > 0) {
+        if (remainingBudget() < FLOOR_MS) {
+          recordUnattempted(attemptedFks, "deadline");
+        } else {
+          await client.query("SAVEPOINT pks");
+          try {
+            await client.query(`SET LOCAL statement_timeout = ${Math.min(settings.statementTimeoutMs, remainingBudget())}`);
+            pks = new Map<number, string[]>([[rootId.oid, pk], ...(await catalog.primaryKeys(client, relatedIds))]);
+            await client.query("RELEASE SAVEPOINT pks");
+          } catch {
+            await client.query("ROLLBACK TO SAVEPOINT pks");
+            try {
+              await client.query("RELEASE SAVEPOINT pks");
+            } catch {}
+            recordUnattempted(attemptedFks, "deadline");
+          }
+        }
       }
+
+      if (relations_not_attempted.length === 0) {
+        for (let i = 0; i < attemptedFks.length; i++) {
+          const { direction, fk, related } = attemptedFks[i];
+          const remaining = remainingBudget();
+          if (remaining < FLOOR_MS) {
+            recordUnattempted(attemptedFks.slice(i), "deadline");
+            break;
+          }
+
+          const [match, rootColumns] = direction === "outgoing" ? [fk.to_columns, fk.from_columns] : [fk.from_columns, fk.to_columns];
+          const values = rootColumns.map((c) => text.get(c) ?? null);
+          const orderBy = pks.get(related.oid) ?? ["ctid"];
+          const entry: Relation = {
+            direction,
+            table: catalog.qualifiedName(related.schema, related.table),
+            constraint: fk.constraint,
+            source_columns: fk.from_columns,
+            target_columns: fk.to_columns,
+            status: "ok",
+            order_by: orderBy,
+            columns: [],
+            rows: [],
+            rows_returned: 0,
+            has_more: false,
+          };
+          relations.push(entry);
+          if (values.includes(null)) continue;
+
+          const savepoint = `rel_${relations.length}`;
+          await client.query(`SAVEPOINT ${savepoint}`);
+          try {
+            const relTimeout = Math.min(settings.statementTimeoutMs, remaining);
+            await client.query(`SET LOCAL statement_timeout = ${relTimeout}`);
+
+            const result = await client.query<unknown[]>({
+              text: `SELECT * FROM ${from(related)} WHERE ${where(match)}
+                     ORDER BY ${orderBy.map(ident).join(", ")} LIMIT ${limit + 1}`,
+              values,
+              rowMode: "array",
+            });
+            await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+            entry.columns = result.fields.map((f) => f.name);
+            entry.rows = shape(result.fields, result.rows.slice(0, limit));
+            entry.rows_returned = entry.rows.length;
+            entry.has_more = result.rows.length > limit;
+          } catch (err) {
+            await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+            try {
+              await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+            } catch {}
+            const qErr = toQueryError(err);
+            const isTimeout =
+              qErr.category === "timeout" || qErr.category === "lock_timeout" || qErr.code === "57014" || qErr.code === "55P03";
+            entry.status = isTimeout ? "timeout" : "error";
+          }
+        }
+      }
+
+      recordUnattempted(cappedFks, "max_relations");
 
       return {
         table,
         columns,
         row: shape(found.fields, [parsed])[0],
         relations,
+        relations_not_attempted,
         values_truncated: valuesTruncated,
         values_redacted: valuesRedacted,
         duration_ms: Math.round(performance.now() - started),

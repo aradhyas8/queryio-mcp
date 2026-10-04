@@ -1,9 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createCore, type Core, type InspectRowResult, type Relation } from "../src/core.js";
-import { sql, testSettings } from "./db.js";
+import { TEST_URL, sql, testSettings } from "./db.js";
 
 let core: Core;
 
@@ -122,6 +123,194 @@ describe("inspect_row", () => {
     }
   });
 
+  it("caps inspected relations at max_relations and lists the rest as not attempted", async () => {
+    const capped = createCore(testSettings({ QUERYIO_INSPECT_MAX_RELATIONS: "2" }));
+    try {
+      const result = await capped.inspectRow("ins.users", { id: 2 });
+      expect(result.relations.map((r) => [r.direction, r.constraint])).toEqual([
+        ["outgoing", "users_manager_id_fkey"],
+        ["incoming", "memberships_user_id_fkey"],
+      ]);
+      expect(result.relations_not_attempted).toEqual([
+        {
+          direction: "incoming",
+          table: "ins.notes",
+          constraint: "notes_user_id_fkey",
+          source_columns: ["user_id"],
+          target_columns: ["id"],
+          reason: "max_relations",
+        },
+        {
+          direction: "incoming",
+          table: "ins.transfers",
+          constraint: "transfers_recipient_fk",
+          source_columns: ["recipient_id"],
+          target_columns: ["id"],
+          reason: "max_relations",
+        },
+        {
+          direction: "incoming",
+          table: "ins.transfers",
+          constraint: "transfers_sender_fk",
+          source_columns: ["sender_id"],
+          target_columns: ["id"],
+          reason: "max_relations",
+        },
+        {
+          direction: "incoming",
+          table: "ins.users",
+          constraint: "users_manager_id_fkey",
+          source_columns: ["manager_id"],
+          target_columns: ["id"],
+          reason: "max_relations",
+        },
+      ]);
+    } finally {
+      await capped.close();
+    }
+  });
+
+  it("isolates each relation in a savepoint so an error on one relation does not fail others", async () => {
+    await sql(`
+      DROP ROLE IF EXISTS inspect_user;
+      CREATE ROLE inspect_user LOGIN PASSWORD 'pw';
+      GRANT USAGE ON SCHEMA ins TO inspect_user;
+      GRANT SELECT ON ALL TABLES IN SCHEMA ins TO inspect_user;
+      CREATE TABLE ins.forbidden_rel (id int PRIMARY KEY, user_id int REFERENCES ins.users (id));
+      INSERT INTO ins.forbidden_rel VALUES (1, 2);
+      REVOKE ALL ON ins.forbidden_rel FROM inspect_user;
+    `);
+    const userUrl = new URL(TEST_URL);
+    userUrl.username = "inspect_user";
+    userUrl.password = "pw";
+    const userCore = createCore(testSettings({ QUERYIO_DATABASE_URL: userUrl.toString() }));
+
+    try {
+      const result = await userCore.inspectRow("ins.users", { id: 2 });
+      const forbidden = relation(result, "incoming", "forbidden_rel_user_id_fkey");
+      expect(forbidden.status).toBe("error");
+      expect(forbidden.rows).toEqual([]);
+      expect(forbidden.rows_returned).toBe(0);
+
+      // Other relations still return ok
+      const manager = relation(result, "outgoing", "users_manager_id_fkey");
+      expect(manager.status).toBe("ok");
+      expect(manager.rows_returned).toBe(1);
+
+      // Session remains usable
+      const again = await userCore.inspectRow("ins.users", { id: 1 });
+      expect(again.row[0]).toBe(1);
+    } finally {
+      await userCore.close();
+      await sql(`
+        DROP TABLE IF EXISTS ins.forbidden_rel CASCADE;
+        DROP OWNED BY inspect_user CASCADE;
+        DROP ROLE IF EXISTS inspect_user;
+      `);
+    }
+  });
+
+  it("reports timeout on a locked relation while other relations still return ok", async () => {
+    const locker = new pg.Client({ connectionString: TEST_URL });
+    await locker.connect();
+    await locker.query("BEGIN; LOCK TABLE ins.transfers IN ACCESS EXCLUSIVE MODE");
+
+    const coreWithTimeout = createCore(
+      testSettings({
+        QUERYIO_STATEMENT_TIMEOUT_MS: "300",
+        QUERYIO_LOCK_TIMEOUT_MS: "1000",
+        QUERYIO_INSPECT_DEADLINE_MS: "4000",
+      }),
+    );
+    try {
+      const result = await coreWithTimeout.inspectRow("ins.users", { id: 2 });
+      const transfers = result.relations.filter((r) => r.table === "ins.transfers");
+      expect(transfers.length).toBeGreaterThan(0);
+      for (const t of transfers) {
+        expect(t.status).toBe("timeout");
+        expect(t.rows).toEqual([]);
+      }
+
+      // Unlocked relation (outgoing manager) is ok
+      const manager = relation(result, "outgoing", "users_manager_id_fkey");
+      expect(manager.status).toBe("ok");
+      expect(manager.rows_returned).toBe(1);
+
+      // Root row returned normally
+      expect(result.row[0]).toBe(2);
+    } finally {
+      await coreWithTimeout.close();
+      await locker.query("ROLLBACK");
+      await locker.end();
+    }
+  });
+
+  it("bounds the entire call by a total deadline across several locked relations (mandatory deadline regression)", async () => {
+    await sql(`
+      DROP SCHEMA IF EXISTS dead CASCADE;
+      CREATE SCHEMA dead;
+      CREATE TABLE dead.root (id int PRIMARY KEY, name text);
+      INSERT INTO dead.root VALUES (1, 'root-row');
+      CREATE TABLE dead.a_unlocked (id int PRIMARY KEY, root_id int REFERENCES dead.root (id), val text);
+      INSERT INTO dead.a_unlocked VALUES (10, 1, 'unlocked-val');
+      CREATE TABLE dead.in1 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+      CREATE TABLE dead.in2 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+      CREATE TABLE dead.in3 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+      CREATE TABLE dead.in4 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+      CREATE TABLE dead.in5 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+      CREATE TABLE dead.in6 (id int PRIMARY KEY, root_id int REFERENCES dead.root (id));
+    `);
+
+    const locker = new pg.Client({ connectionString: TEST_URL });
+    await locker.connect();
+    await locker.query("BEGIN; LOCK TABLE dead.in1, dead.in2, dead.in3, dead.in4, dead.in5, dead.in6 IN ACCESS EXCLUSIVE MODE");
+
+    // statement_timeout 2000 ms, lock_timeout 5000 ms (above that), deadline 3000 ms (naive cost >= 12 s)
+    const coreWithDeadline = createCore(
+      testSettings({
+        QUERYIO_STATEMENT_TIMEOUT_MS: "2000",
+        QUERYIO_LOCK_TIMEOUT_MS: "5000",
+        QUERYIO_INSPECT_DEADLINE_MS: "3000",
+      }),
+    );
+    try {
+      const started = performance.now();
+      const result = await coreWithDeadline.inspectRow("dead.root", { id: 1 });
+      const elapsed = performance.now() - started;
+
+      // Returns within deadline + small slack (< 3.5 s)
+      expect(elapsed).toBeLessThan(3500);
+
+      // Root and unlocked relations are ok
+      expect(result.row).toEqual([1, "root-row"]);
+      const unlocked = relation(result, "incoming", "a_unlocked_root_id_fkey");
+      expect(unlocked.status).toBe("ok");
+      expect(unlocked.rows).toEqual([[10, 1, "unlocked-val"]]);
+
+      // In-flight locked relation is timeout
+      const lockedRel = result.relations.find((r) => r.table.startsWith("dead.in") && r.status === "timeout");
+      expect(lockedRel).toBeDefined();
+
+      // The rest are listed with reason deadline
+      expect(result.relations_not_attempted.length).toBeGreaterThan(0);
+      expect(result.relations_not_attempted.every((r) => r.reason === "deadline")).toBe(true);
+
+      // Session is usable afterwards
+      await locker.query("ROLLBACK");
+      const usable = await coreWithDeadline.inspectRow("dead.root", { id: 1 });
+      expect(usable.row).toEqual([1, "root-row"]);
+      expect(usable.relations.every((r) => r.status === "ok")).toBe(true);
+      expect(usable.relations_not_attempted).toEqual([]);
+    } finally {
+      await coreWithDeadline.close();
+      try {
+        await locker.query("ROLLBACK");
+      } catch {}
+      await locker.end();
+      await sql("DROP SCHEMA IF EXISTS dead CASCADE");
+    }
+  });
+
   it("returns the same result across repeated calls", async () => {
     const strip = ({ duration_ms, ...rest }: InspectRowResult) => rest;
     const first = strip(await core.inspectRow("ins.users", { id: 1 }));
@@ -183,6 +372,50 @@ describe("inspect_row errors", () => {
 
   it("reports an unknown table", async () => {
     await expect(core.inspectRow("users", { id: 1 })).rejects.toMatchObject({ category: "not_found" });
+  });
+
+  it("returns overall timeout error when root table is held under ACCESS EXCLUSIVE lock (pre-root deadline)", async () => {
+    const locker = new pg.Client({ connectionString: TEST_URL });
+    await locker.connect();
+    await locker.query("BEGIN; LOCK TABLE ins.users IN ACCESS EXCLUSIVE MODE");
+
+    const coreWithTimeout = createCore(
+      testSettings({
+        QUERYIO_STATEMENT_TIMEOUT_MS: "2000",
+        QUERYIO_LOCK_TIMEOUT_MS: "5000",
+        QUERYIO_INSPECT_DEADLINE_MS: "3000",
+      }),
+    );
+    try {
+      const started = Date.now();
+      await expect(coreWithTimeout.inspectRow("ins.users", { id: 1 })).rejects.toMatchObject({
+        category: "timeout",
+      });
+      const elapsed = Date.now() - started;
+      expect(elapsed).toBeLessThan(3500);
+
+      // Leaves the session usable
+      await locker.query("ROLLBACK");
+      const usable = await coreWithTimeout.inspectRow("ins.users", { id: 1 });
+      expect(usable.row[0]).toBe(1);
+    } finally {
+      await coreWithTimeout.close();
+      try {
+        await locker.query("ROLLBACK");
+      } catch {}
+      await locker.end();
+    }
+  });
+
+  it("returns overall timeout error when deadline budget is exhausted before root row is obtained", async () => {
+    const exhausted = createCore(testSettings({ QUERYIO_INSPECT_DEADLINE_MS: "10" }));
+    try {
+      await expect(exhausted.inspectRow("ins.users", { id: 1 })).rejects.toMatchObject({
+        category: "timeout",
+      });
+    } finally {
+      await exhausted.close();
+    }
   });
 });
 

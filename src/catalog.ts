@@ -259,3 +259,16 @@ function attnames(rel: string, keys: string): string {
   return `ARRAY(SELECT a.attname::text FROM unnest(${keys}) WITH ORDINALITY k(attnum, i)
                 JOIN pg_attribute a ON a.attrelid = ${rel} AND a.attnum = k.attnum ORDER BY k.i)`;
 }
+
+/** Fetch primary-key columns for tables without reading indexes or stats, avoiding locks. */
+export async function primaryKeys(client: pg.ClientBase, ids: TableId[]): Promise<Map<number, string[]>> {
+  const oids = ids.map((id) => id.oid);
+  if (oids.length === 0) return new Map();
+  const { rows } = await client.query<{ oid: number; pk: string[] }>(
+    `SELECT con.conrelid AS oid, ${attnames("con.conrelid", "con.conkey")} AS pk
+     FROM pg_constraint con
+     WHERE con.contype = 'p' AND con.conrelid = ANY($1::oid[])`,
+    [oids],
+  );
+  return new Map(rows.map((r) => [r.oid, r.pk]));
+}
