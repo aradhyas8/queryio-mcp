@@ -72,6 +72,7 @@ it("runs queryio check, reporting connectivity, role privileges, warnings, and r
   expect(run.stdout).toContain("Redaction patterns:");
   expect(run.stdout).toContain("Warnings:");
   expect(run.stdout).toContain('connected role "postgres" is highly privileged');
+  expect(run.stdout).toContain("Dedicated read-only role SQL template:");
   expect(run.stdout).toContain("CREATE ROLE queryio_role WITH LOGIN PASSWORD");
 });
 
@@ -111,7 +112,9 @@ it("runs queryio check against a read-only role, reporting no superuser and no w
     expect(run.stdout).toContain(`Connected role:          ${roRole}`);
     expect(run.stdout).toContain("Superuser:               no");
     expect(run.stdout).toContain("Write privileges:        none");
-    expect(run.stdout).toContain("none (role is least-privileged)");
+    expect(run.stdout).toContain("none detected");
+    expect(run.stdout).not.toContain("none (role is least-privileged)");
+    expect(run.stdout).toContain("Dedicated read-only role SQL template:");
   } finally {
     await sql(dropRoleSafe);
   }

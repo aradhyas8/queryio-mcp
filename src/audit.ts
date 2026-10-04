@@ -17,9 +17,9 @@ export function createAuditLog(path: string | null): (event: AuditEvent) => void
   let warned = false;
   return (event) => {
     try {
-      if (!ready) mkdirSync(dirname(path), { recursive: true });
+      if (!ready) mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       ready = true;
-      appendFileSync(path, JSON.stringify(event) + "\n");
+      appendFileSync(path, JSON.stringify(event) + "\n", { mode: 0o600 });
     } catch (err) {
       // An unwritable log must not fail the tool call. stderr is safe: stdout carries the MCP protocol.
       if (!warned) console.error(`queryio: cannot write audit log ${path}: ${(err as Error).message}`);
