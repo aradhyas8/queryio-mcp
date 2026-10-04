@@ -3,6 +3,7 @@ import type pg from "pg";
 /**
  * QueryIO's one model of tables, keys and foreign-key constraints, read from the PostgreSQL catalog.
  * Table names are always schema-qualified as `schema.table`, exactly as stored (no quoting).
+ * ponytail: names containing dots can collide (`"a.b".c` vs `a."b.c"`); carry schema and table separately if that bites.
  */
 
 export interface TableSummary {
@@ -91,7 +92,8 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
        ORDER BY a.attnum`,
       [oids],
     );
-    // conparentid = 0 skips the clones Postgres adds on partitions.
+    // Skip the per-partition clones Postgres adds to the same table for an FK to a partitioned table. Constraints a
+    // partition inherits from its parent belong to the partition and stay.
     const constraints = await client.query<ForeignKey & { kind: "p" | "f"; from_oid: number; to_oid: number }>(
       `SELECT con.conname AS constraint, con.contype AS kind,
               con.conrelid AS from_oid, fn.nspname || '.' || fc.relname AS from_table,
@@ -101,7 +103,7 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
        FROM pg_constraint con
        JOIN pg_class fc ON fc.oid = con.conrelid JOIN pg_namespace fn ON fn.oid = fc.relnamespace
        LEFT JOIN pg_class tc ON tc.oid = con.confrelid LEFT JOIN pg_namespace tn ON tn.oid = tc.relnamespace
-       WHERE con.conparentid = 0
+       WHERE NOT EXISTS (SELECT 1 FROM pg_constraint p WHERE p.oid = con.conparentid AND p.conrelid = con.conrelid)
          AND ((con.contype = 'p' AND con.conrelid = ANY($1::oid[]))
               OR (con.contype = 'f' AND (con.conrelid = ANY($1::oid[]) OR con.confrelid = ANY($1::oid[]))))
        ORDER BY con.conname, fn.nspname, fc.relname`,

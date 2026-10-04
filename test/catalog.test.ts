@@ -135,6 +135,20 @@ describe("describe_tables", () => {
     expect((await core.describeTables(["cat.grants"])).tables[0]).not.toHaveProperty("error");
   });
 
+  it("gives a partition its inherited keys, without per-partition clones of FKs to a partitioned table", async () => {
+    await sql(`
+      CREATE TABLE cat.events (id int, at date, PRIMARY KEY (id, at)) PARTITION BY RANGE (at);
+      CREATE TABLE cat.events_2026 PARTITION OF cat.events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+      CREATE TABLE cat.event_refs (id int PRIMARY KEY, event_id int, event_at date,
+        CONSTRAINT event_refs_event_fk FOREIGN KEY (event_id, event_at) REFERENCES cat.events (id, at));
+    `);
+    const { tables } = await core.describeTables(["cat.events_2026", "cat.event_refs", "cat.events"]);
+    expect(tables[0]).toMatchObject({ primary_key: ["id", "at"] });
+    expect(tables[1]).toMatchObject({ foreign_keys_out: [{ constraint: "event_refs_event_fk", to_table: "cat.events" }] });
+    expect((tables[1] as { foreign_keys_out: unknown[] }).foreign_keys_out).toHaveLength(1);
+    expect(tables[2]).toMatchObject({ foreign_keys_in: [{ constraint: "event_refs_event_fk" }] });
+  });
+
   it("returns no primary key for a table without one", async () => {
     await sql("DROP TABLE IF EXISTS cat.loose; CREATE TABLE cat.loose (v text)");
     const { tables } = await core.describeTables(["cat.loose"]);
@@ -152,7 +166,9 @@ it("audits both tools with tables involved and bytes, never the filter", async (
   } finally {
     await audited.close();
   }
-  const events = existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").map((l) => JSON.parse(l)) : [];
+  const raw = existsSync(path) ? readFileSync(path, "utf8") : "";
+  rmSync(dir, { recursive: true, force: true });
+  const events = raw.trim().split("\n").map((l) => JSON.parse(l));
   expect(events).toEqual([
     {
       ts: expect.any(String),
@@ -165,13 +181,13 @@ it("audits both tools with tables involved and bytes, never the filter", async (
     {
       ts: expect.any(String),
       tool: "describe_tables",
-      tables: ["cat.transfers", "cat.nope"],
       duration_ms: expect.any(Number),
       success: true,
+      tables: ["cat.transfers"],
       tables_failed: 1,
       bytes_returned: expect.any(Number),
     },
   ]);
-  expect(readFileSync(path, "utf8")).not.toContain("galaxy");
-  rmSync(dir, { recursive: true, force: true });
+  expect(raw).not.toContain("galaxy");
+  expect(raw).not.toContain("cat.nope");
 });

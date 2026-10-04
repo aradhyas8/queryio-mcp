@@ -218,7 +218,7 @@ export function createCore(settings: Settings): Core {
     describeTables(tables) {
       return audited(
         "describe_tables",
-        { tables },
+        {},
         async () => {
           const found = await readOnly((client) => catalog.describeTables(client, tables));
           return {
@@ -234,7 +234,9 @@ export function createCore(settings: Settings): Core {
             ),
           };
         },
+        // Resolved tables only: requested names are tool arguments.
         (result) => ({
+          tables: result.tables.filter((t) => !("error" in t)).map((t) => t.name),
           tables_failed: result.tables.filter((t) => "error" in t).length,
           bytes_returned: Buffer.byteLength(JSON.stringify(result)),
         }),
