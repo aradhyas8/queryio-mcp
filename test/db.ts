@@ -1,4 +1,5 @@
 import pg from "pg";
+import { loadSettings, type Settings } from "../src/settings.js";
 
 // Shared Docker Postgres from docker-compose.yml; tests use their own database.
 export const ADMIN_URL = process.env.QUERYIO_TEST_ADMIN_URL ?? "postgres://postgres:postgres@localhost:54329/postgres";
@@ -23,4 +24,9 @@ export async function sql(text: string): Promise<pg.QueryResult> {
 export async function tableExists(name: string): Promise<boolean> {
   const { rows } = await sql(`SELECT to_regclass('public.${name}') IS NOT NULL AS exists`);
   return rows[0].exists;
+}
+
+/** Settings for the test database. The audit log is off unless a test turns it on. */
+export function testSettings(env: Record<string, string> = {}): Settings {
+  return loadSettings({ QUERYIO_DATABASE_URL: TEST_URL, QUERYIO_AUDIT_LOG: "off", ...env });
 }
