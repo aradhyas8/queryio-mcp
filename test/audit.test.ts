@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+﻿import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -75,4 +75,20 @@ it("is disabled by QUERYIO_AUDIT_LOG=off", () => {
 
 it("defaults to ~/.queryio/audit.jsonl", () => {
   expect(loadSettings({ QUERYIO_DATABASE_URL: "postgres://x" }).auditLog).toBe(join(homedir(), ".queryio", "audit.jsonl"));
+});
+
+it("a byte-capped query logs truncated_by bytes", async () => {
+  const { events } = await audited(
+    { QUERYIO_MAX_RESPONSE_BYTES: "500" },
+    "SELECT g, repeat('x', 150) AS pad FROM generate_series(1, 50) g",
+  );
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({ tool: "query", success: true, has_more: true, truncated_by: "bytes" });
+});
+
+it("no truncated field appears anywhere in any query audit event", async () => {
+  const { events } = await audited({ QUERYIO_MAX_ROWS: "2" }, "SELECT g FROM generate_series(1, 5) g");
+  for (const ev of events) {
+    expect(Object.keys(ev)).not.toContain("truncated");
+  }
 });

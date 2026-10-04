@@ -536,6 +536,11 @@ export function createCore(settings: Settings): Core {
           rows_returned: 1 + result.relations.reduce((n, r) => n + r.rows_returned, 0),
           bytes_returned: Buffer.byteLength(JSON.stringify(result)),
           values_truncated: result.values_truncated,
+          relations_ok: result.relations.filter((r) => r.status === "ok").length,
+          relations_timeout: result.relations.filter((r) => r.status === "timeout").length,
+          relations_error: result.relations.filter((r) => r.status === "error").length,
+          relations_not_attempted_max_relations: result.relations_not_attempted.filter((r) => r.reason === "max_relations").length,
+          relations_not_attempted_deadline: result.relations_not_attempted.filter((r) => r.reason === "deadline").length,
         }),
       );
     },

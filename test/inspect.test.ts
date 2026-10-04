@@ -467,12 +467,71 @@ it("audits tables involved, rows and bytes, never key values", async () => {
       rows_returned: 10,
       bytes_returned: expect.any(Number),
       values_truncated: 1,
+      relations_ok: expect.any(Number),
+      relations_timeout: 0,
+      relations_error: 0,
+      relations_not_attempted_max_relations: 0,
+      relations_not_attempted_deadline: 0,
     },
-    expect.objectContaining({ tool: "inspect_row", success: true, tables: ["ins.tags"], rows_returned: 1 }),
+    expect.objectContaining({
+      tool: "inspect_row",
+      success: true,
+      tables: ["ins.tags"],
+      rows_returned: 1,
+      relations_ok: 0,
+      relations_timeout: 0,
+      relations_error: 0,
+      relations_not_attempted_max_relations: 0,
+      relations_not_attempted_deadline: 0,
+    }),
     expect.objectContaining({ tool: "inspect_row", success: false, error_category: "row_not_found" }),
   ]);
   expect(raw).not.toContain("zebra-key");
   expect(raw).not.toContain("missing-key");
+});
+
+it("audits relation status and not-attempted counts when the deadline is hit", async () => {
+  await sql(`
+    DROP SCHEMA IF EXISTS auditdead CASCADE;
+    CREATE SCHEMA auditdead;
+    CREATE TABLE auditdead.root (id int PRIMARY KEY, name text);
+    INSERT INTO auditdead.root VALUES (1, 'r');
+    CREATE TABLE auditdead.slow1 (id int PRIMARY KEY, root_id int REFERENCES auditdead.root (id));
+    CREATE TABLE auditdead.slow2 (id int PRIMARY KEY, root_id int REFERENCES auditdead.root (id));
+    CREATE TABLE auditdead.slow3 (id int PRIMARY KEY, root_id int REFERENCES auditdead.root (id));
+  `);
+  const locker = new pg.Client({ connectionString: TEST_URL });
+  await locker.connect();
+  await locker.query("BEGIN; LOCK TABLE auditdead.slow1, auditdead.slow2, auditdead.slow3 IN ACCESS EXCLUSIVE MODE");
+
+  const dir = mkdtempSync(join(tmpdir(), "queryio-audit-"));
+  const path = join(dir, "audit.jsonl");
+  const deadlineCore = createCore(
+    testSettings({
+      QUERYIO_AUDIT_LOG: path,
+      QUERYIO_STATEMENT_TIMEOUT_MS: "1000",
+      QUERYIO_LOCK_TIMEOUT_MS: "5000",
+      QUERYIO_INSPECT_DEADLINE_MS: "2000",
+    }),
+  );
+  try {
+    await deadlineCore.inspectRow("auditdead.root", { id: 1 });
+  } finally {
+    await deadlineCore.close();
+    try { await locker.query("ROLLBACK"); } catch {}
+    await locker.end();
+    await sql("DROP SCHEMA IF EXISTS auditdead CASCADE");
+  }
+  const raw = existsSync(path) ? readFileSync(path, "utf8") : "";
+  rmSync(dir, { recursive: true, force: true });
+  const events = raw.trim().split("\n").map((l) => JSON.parse(l));
+  expect(events).toHaveLength(1);
+  const ev = events[0];
+  expect(ev).toMatchObject({ tool: "inspect_row", success: true });
+  // At least one relation timed out or was deferred due to the deadline.
+  expect(ev.relations_timeout + ev.relations_not_attempted_deadline).toBeGreaterThan(0);
+  // No bare "truncated" field anywhere in the audit event.
+  expect(Object.keys(ev)).not.toContain("truncated");
 });
 
 it("keeps tables whose schema-qualified names would flatten alike apart (identity regression)", async () => {
