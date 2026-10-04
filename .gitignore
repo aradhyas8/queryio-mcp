@@ -5,7 +5,7 @@ dist/
 # Private planning and benchmark material (kept locally, not published)
 .scratch/
 SPEC.md
-fixture/
+
 
 # Agent runtime artifacts
 .agents/
