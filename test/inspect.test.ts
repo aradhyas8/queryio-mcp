@@ -43,6 +43,41 @@ beforeAll(async () => {
     INSERT INTO ins.transfers VALUES (500, 1, 2, 'k-500'), (501, 2, 1, 'k-501');
     INSERT INTO ins.notes VALUES ('hi', 2);
     INSERT INTO ins.tags VALUES ('a''b'), ('zebra-key');
+
+    CREATE TABLE ins.events (
+      id int PRIMARY KEY,
+      event_date date NOT NULL,
+      event_ts timestamp NOT NULL,
+      dates date[] NOT NULL,
+      timestamps timestamp[] NOT NULL,
+      tstz timestamptz NOT NULL
+    );
+    CREATE TABLE ins.event_logs (
+      id int PRIMARY KEY,
+      event_id int REFERENCES ins.events (id),
+      logged_date date NOT NULL,
+      logged_ts timestamp NOT NULL,
+      dates date[] NOT NULL,
+      timestamps timestamp[] NOT NULL,
+      tstz timestamptz NOT NULL
+    );
+    INSERT INTO ins.events VALUES (
+      1,
+      '2026-09-04',
+      '2026-09-04 10:00:00',
+      ARRAY['2026-09-04'::date, '2026-09-05'::date],
+      ARRAY['2026-09-04 10:00:00'::timestamp],
+      '2026-09-04 10:00:00+00'
+    );
+    INSERT INTO ins.event_logs VALUES (
+      10,
+      1,
+      '2026-09-04',
+      '2026-09-04 10:00:00',
+      ARRAY['2026-09-04'::date, '2026-09-05'::date],
+      ARRAY['2026-09-04 10:00:00'::timestamp],
+      '2026-09-04 10:00:00+00'
+    );
   `);
   core = createCore(testSettings());
 });
@@ -96,6 +131,24 @@ describe("inspect_row", () => {
     expect(relation(result, "incoming", "memberships_user_id_fkey")).toMatchObject({ rows: [], rows_returned: 0, has_more: false });
     // A table without a primary key is still ordered deterministically, by physical position.
     expect(relation(result, "incoming", "notes_user_id_fkey")).toMatchObject({ order_by: ["ctid"], rows: [["hi", 2]] });
+  });
+
+  it("returns exact text strings for date, timestamp, and array values in root and related rows", async () => {
+    const result = await core.inspectRow("ins.events", { id: 1 });
+    const dateValues = [
+      "2026-09-04",
+      "2026-09-04 10:00:00",
+      "{2026-09-04,2026-09-05}",
+      '{"2026-09-04 10:00:00"}',
+      expect.any(Date),
+    ];
+    expect(result).toMatchObject({
+      table: "ins.events",
+      columns: ["id", "event_date", "event_ts", "dates", "timestamps", "tstz"],
+      row: [1, ...dateValues],
+    });
+    const logRel = relation(result, "incoming", "event_logs_event_id_fkey");
+    expect(logRel.rows).toEqual([[10, 1, ...dateValues]]);
   });
 
   it("returns exactly N related rows in primary-key order, without has_more when no more exist", async () => {

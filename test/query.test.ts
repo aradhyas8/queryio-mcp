@@ -81,6 +81,53 @@ describe("query", () => {
     }
     expect((await core.query("SELECT count(*)::int AS n FROM widgets")).rows).toEqual([[2]]);
   });
+
+  it("returns date and timestamp as exact text strings and leaves timestamptz unchanged", async () => {
+    const result = await core.query(`
+      SELECT
+        DATE '2026-09-04' AS d,
+        TIMESTAMP '2026-09-04 10:00:00' AS ts,
+        TIMESTAMPTZ '2026-09-04 10:00:00+00' AS tstz
+    `);
+    expect(result.rows).toEqual([
+      ["2026-09-04", "2026-09-04 10:00:00", expect.any(Date)],
+    ]);
+  });
+
+  it("returns date[] and timestamp[] as PostgreSQL array literal text strings", async () => {
+    const result = await core.query(`
+      SELECT
+        ARRAY[DATE '2026-09-04', DATE '2026-09-05'] AS d_arr,
+        ARRAY[TIMESTAMP '2026-09-04 10:00:00'] AS ts_arr
+    `);
+    expect(result.rows).toEqual([
+      ["{2026-09-04,2026-09-05}", '{"2026-09-04 10:00:00"}'],
+    ]);
+  });
+
+  it("does not mutate the process-global pg.types registry (pool-scoped override)", () => {
+    const dateParser = pg.types.getTypeParser(pg.types.builtins.DATE, "text");
+    const result = dateParser("2026-09-04");
+    expect(result).toBeInstanceOf(Date);
+  });
+
+  it("truncates and redacts date values as ordinary strings", async () => {
+    const limited = createCore(testSettings({ QUERYIO_MAX_VALUE_LENGTH: "10", QUERYIO_REDACT_ADD: "secret_date" }));
+    try {
+      const result = await limited.query(`
+        SELECT
+          ARRAY['2026-09-04'::date, '2026-09-05'::date, '2026-09-06'::date, '2026-09-07'::date, '2026-09-08'::date] AS long_date_arr,
+          DATE '2026-09-04' AS secret_date
+      `);
+      expect(result.rows).toEqual([
+        [expect.stringMatching(/^\{2026-09-0…\[\+\d+B\]$/), "[redacted]"],
+      ]);
+      expect(result.values_truncated).toBe(1);
+      expect(result.values_redacted).toBe(1);
+    } finally {
+      await limited.close();
+    }
+  });
 });
 
 describe("bounded results", () => {
