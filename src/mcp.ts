@@ -10,7 +10,7 @@ export function createServer(core: Core): McpServer {
     "query",
     {
       description:
-        "Run one read-only SQL statement (SELECT, WITH, VALUES, TABLE, SHOW) against PostgreSQL. Runs in a read-only transaction that is always rolled back, with server-side timeouts. Results are bounded: has_more means more rows existed (truncated_by says whether the row cap or byte budget stopped retrieval), and long values are cut with a …[+size] marker.",
+        "Run one read-only SQL statement (SELECT, WITH, VALUES, TABLE, SHOW) against PostgreSQL. Runs in a read-only transaction that is always rolled back, with server-side timeouts. Results are bounded: has_more means more rows existed (truncated_by says whether the row cap or byte budget stopped retrieval), and long values are cut with a …[+size] marker. Columns with sensitive-looking names (password, token, api_key, ...) come back as [redacted], counted in columns_redacted and values_redacted.",
       inputSchema: { sql: z.string().describe("A single read-only SQL statement") },
       outputSchema: {
         columns: z.array(z.string()),
@@ -19,6 +19,8 @@ export function createServer(core: Core): McpServer {
         has_more: z.boolean(),
         truncated_by: z.enum(["rows", "bytes"]).nullable(),
         values_truncated: z.number(),
+        columns_redacted: z.number(),
+        values_redacted: z.number(),
         duration_ms: z.number(),
       },
     },

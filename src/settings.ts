@@ -11,7 +11,21 @@ export interface Settings {
   /** Audit log path, or null when disabled. */
   readonly auditLog: string | null;
   readonly auditIncludeSql: boolean;
+  /** Lowercase column names whose values are hidden; see isRedacted. */
+  readonly redactPatterns: readonly string[];
 }
+
+const DEFAULT_REDACT_PATTERNS = [
+  "password",
+  "password_hash",
+  "secret",
+  "token",
+  "access_token",
+  "refresh_token",
+  "api_key",
+  "private_key",
+  "credential",
+];
 
 /** Read configuration once at startup. The connection comes only from QUERYIO_DATABASE_URL. */
 export function loadSettings(env: Record<string, string | undefined>): Settings {
@@ -27,6 +41,15 @@ export function loadSettings(env: Record<string, string | undefined>): Settings 
     if (!/^[1-9]\d*$/.test(raw)) throw new Error(`${name} must be a positive integer, got "${raw}"`);
     return Number(raw);
   };
+  const list = (name: string): string[] =>
+    (env[name] ?? "")
+      .split(",")
+      .map((p) => p.trim().toLowerCase())
+      .filter(Boolean);
+  const removed = list("QUERYIO_REDACT_REMOVE");
+  const redactPatterns = [...new Set([...DEFAULT_REDACT_PATTERNS, ...list("QUERYIO_REDACT_ADD")])].filter(
+    (p) => !removed.includes(p),
+  );
   const auditLog = env.QUERYIO_AUDIT_LOG || join(homedir(), ".queryio", "audit.jsonl");
   return Object.freeze({
     databaseUrl,
@@ -37,5 +60,6 @@ export function loadSettings(env: Record<string, string | undefined>): Settings 
     maxValueLength: positiveInt("QUERYIO_MAX_VALUE_LENGTH", 200),
     auditLog: auditLog.toLowerCase() === "off" ? null : auditLog,
     auditIncludeSql: env.QUERYIO_AUDIT_INCLUDE_SQL === "true",
+    redactPatterns: Object.freeze(redactPatterns),
   });
 }
