@@ -198,3 +198,41 @@ describe("structured errors", () => {
     }
   });
 });
+
+describe("redaction", () => {
+  const secrets = `SELECT 1 AS id, 'h' AS "Password_Hash", 't' AS token, 'k' AS api_key, 'a@b.c' AS email,
+    now() AS token_expires_at, NULL::text AS secret`;
+
+  it("redacts columns matching default patterns case-insensitively and counts them", async () => {
+    const result = await core.query(secrets);
+    expect(result.rows).toEqual([[1, "[redacted]", "[redacted]", "[redacted]", "a@b.c", expect.any(Date), "[redacted]"]]);
+    expect(result).toMatchObject({ columns_redacted: 4, values_redacted: 4 });
+  });
+
+  it("applies added patterns and drops removed ones", async () => {
+    const c = createCore(testSettings({ QUERYIO_REDACT_ADD: " Email ,ssn", QUERYIO_REDACT_REMOVE: "token,api_key" }));
+    try {
+      const result = await c.query(secrets);
+      expect(result.rows).toEqual([[1, "[redacted]", "t", "k", "[redacted]", expect.any(Date), "[redacted]"]]);
+      expect(result).toMatchObject({ columns_redacted: 3, values_redacted: 3 });
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("redacts before value truncation and byte accounting", async () => {
+    const c = createCore(testSettings({ QUERYIO_MAX_RESPONSE_BYTES: "600" }));
+    try {
+      const result = await c.query("SELECT g, repeat('x', 5000) AS secret FROM generate_series(1, 5) g");
+      expect(result).toMatchObject({ row_count: 5, has_more: false, values_truncated: 0, values_redacted: 5 });
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(600);
+    } finally {
+      await c.close();
+    }
+  });
+
+  it("reports redacted columns even when no rows come back", async () => {
+    const result = await core.query("SELECT 1 AS id, 'x' AS password WHERE false");
+    expect(result).toMatchObject({ row_count: 0, columns_redacted: 1, values_redacted: 0 });
+  });
+});
