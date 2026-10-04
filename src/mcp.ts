@@ -23,6 +23,7 @@ export function createServer(core: Core): McpServer {
         columns_redacted: z.number(),
         values_redacted: z.number(),
         duration_ms: z.number(),
+        warnings: z.array(z.string()).optional(),
       },
     },
     ({ sql }) => respond(core.query(sql)),
@@ -66,14 +67,22 @@ export function createServer(core: Core): McpServer {
   );
 
   return server;
-}
 
-/** Shape a core result as structured plus compact text content, or a core failure as a structured tool error. */
-async function respond(work: Promise<object>): Promise<CallToolResult> {
-  try {
-    const result = await work;
-    return { structuredContent: { ...result }, content: [{ type: "text", text: JSON.stringify(result) }] };
-  } catch (err) {
-    return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: toQueryError(err) }) }] };
+  function attachWarnings<T extends object>(payload: T, warnings?: readonly string[]): T & { warnings?: string[] } {
+    return warnings && warnings.length > 0 ? { ...payload, warnings: [...warnings] } : { ...payload };
+  }
+
+  /** Shape a core result as structured plus compact text content, or a core failure as a structured tool error. */
+  async function respond(work: Promise<object>): Promise<CallToolResult> {
+    const rolePromise = core.inspectRole().catch(() => null);
+    try {
+      const [role, result] = await Promise.all([rolePromise, work]);
+      const structuredContent = attachWarnings(result, role?.warnings);
+      return { structuredContent, content: [{ type: "text", text: JSON.stringify(structuredContent) }] };
+    } catch (err) {
+      const role = await rolePromise;
+      const errorPayload = attachWarnings({ error: toQueryError(err) }, role?.warnings);
+      return { isError: true, content: [{ type: "text", text: JSON.stringify(errorPayload) }] };
+    }
   }
 }

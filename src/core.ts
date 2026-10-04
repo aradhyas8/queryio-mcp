@@ -4,7 +4,27 @@ import Cursor from "pg-cursor";
 import { createAuditLog } from "./audit.js";
 import * as catalog from "./catalog.js";
 import { QueryError, toQueryError } from "./errors.js";
+import { generateRoleTemplate, inspectRole, type RoleInspection } from "./role.js";
 import type { Settings } from "./settings.js";
+
+export type { RoleInspection };
+
+export interface CheckResult extends RoleInspection {
+  readonly connectivity: boolean;
+  readonly limits: {
+    readonly statement_timeout_ms: number;
+    readonly lock_timeout_ms: number;
+    readonly max_rows: number;
+    readonly max_response_bytes: number;
+    readonly max_value_length: number;
+    readonly inspect_related_rows: number;
+    readonly inspect_max_relations: number;
+    readonly inspect_deadline_ms: number;
+  };
+  readonly redact_patterns: readonly string[];
+  readonly audit_log: string | null;
+  readonly role_template: string;
+}
 
 export interface QueryResult {
   columns: string[];
@@ -72,6 +92,10 @@ export interface Core {
   describeTables(tables: string[]): Promise<{ tables: (catalog.TableStructure | TableNotFound)[] }>;
   /** One row by its full primary key, plus up to N rows per declared FK constraint at depth 1. */
   inspectRow(table: string, key: Record<string, unknown>): Promise<InspectRowResult>;
+  /** Role inspection classifying superuser, write privileges, dangerous roles, stats, and warnings. */
+  inspectRole(): Promise<RoleInspection>;
+  /** Complete check contract: role inspection, active limits, redaction patterns, audit location, and SQL template. */
+  check(): Promise<CheckResult>;
   close(): Promise<void>;
 }
 
@@ -429,6 +453,24 @@ export function createCore(settings: Settings): Core {
     });
   }
 
+  let roleInspectionPromise: Promise<RoleInspection> | null = null;
+  function getRoleInspection(): Promise<RoleInspection> {
+    if (!roleInspectionPromise) {
+      roleInspectionPromise = (async () => {
+        const client = await pool.connect();
+        try {
+          return await inspectRole(client);
+        } finally {
+          client.release();
+        }
+      })().catch((err) => {
+        roleInspectionPromise = null;
+        throw err;
+      });
+    }
+    return roleInspectionPromise;
+  }
+
   return {
     query(sql) {
       const sqlFields = {
@@ -496,6 +538,29 @@ export function createCore(settings: Settings): Core {
           values_truncated: result.values_truncated,
         }),
       );
+    },
+    inspectRole() {
+      return getRoleInspection();
+    },
+    async check() {
+      const inspection = await getRoleInspection();
+      return {
+        ...inspection,
+        connectivity: true,
+        limits: {
+          statement_timeout_ms: settings.statementTimeoutMs,
+          lock_timeout_ms: settings.lockTimeoutMs,
+          max_rows: settings.maxRows,
+          max_response_bytes: settings.maxResponseBytes,
+          max_value_length: settings.maxValueLength,
+          inspect_related_rows: settings.inspectRelatedRows,
+          inspect_max_relations: settings.inspectMaxRelations,
+          inspect_deadline_ms: settings.inspectDeadlineMs,
+        },
+        redact_patterns: settings.redactPatterns,
+        audit_log: settings.auditLog,
+        role_template: generateRoleTemplate(inspection.database),
+      };
     },
     close: () => pool.end(),
   };
