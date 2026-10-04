@@ -28,6 +28,24 @@ it("lists the query tool with its input schema", async () => {
   expect(query?.inputSchema).toMatchObject({ type: "object", properties: { sql: { type: "string" } }, required: ["sql"] });
 });
 
+it("lists list_tables and describe_tables with their input schemas", async () => {
+  const { tools } = await client.listTools();
+  const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+  expect(byName.list_tables?.inputSchema).toMatchObject({ type: "object", properties: { filter: { type: "string" } } });
+  expect(byName.list_tables?.inputSchema.required ?? []).toEqual([]);
+  expect(byName.describe_tables?.inputSchema).toMatchObject({
+    type: "object",
+    properties: { tables: { type: "array", items: { type: "string" } } },
+    required: ["tables"],
+  });
+});
+
+it("returns describe_tables per-table errors as a successful call", async () => {
+  const result = await client.callTool({ name: "describe_tables", arguments: { tables: ["public.no_such_table"] } });
+  expect(result.isError).toBeFalsy();
+  expect(result.structuredContent).toMatchObject({ tables: [{ name: "public.no_such_table", error: { category: "not_found" } }] });
+});
+
 it("returns a real Postgres result as structured and compact text content", async () => {
   const result = await client.callTool({ name: "query", arguments: { sql: "SELECT 1 AS n, 'a' AS s" } });
   expect(result.isError).toBeFalsy();
