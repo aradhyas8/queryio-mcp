@@ -2,15 +2,15 @@
   "arm": "B",
   "task": 2,
   "run": 2,
-  "interactions": 12,
-  "db_output_bytes": 40844,
-  "failed_operations": 0,
-  "duration_ms": 3649,
+  "interactions": 14,
+  "db_output_bytes": 26318,
+  "failed_operations": 2,
+  "wall_clock_seconds": 86,
   "grade": "correct",
+  "grading": "manual",
   "grading_notes": "Correct: identified duplicate invoice 90018 open and overdue past grace",
   "final_answer": "\"### Root Cause Investigation: Why Organization 142's Workspace Remains Suspended\\n\\n#### Summary\\nOrganization 142 was issued **duplicate invoices** for the billing period starting `2026-09-04`: invoice **90017** and invoice **90018**. Although Organization 142 paid invoice 90017 on `2026-09-29`, duplicate invoice 90018 remained in `open` status. Because invoice 90018 was also due on `2026-09-11` (more than 14 days past due), the delinquency check `isDelinquent(142)` evaluated to `true`, preventing `onInvoicePaid()` from reactivating Organization 142 and its subscription.\\n\\n---\\n\\n### Key Evidence & Database Findings\\n\\n#### 1. Invoices for Organization 142\\nQuerying `invoices WHERE org_id = 142`:\\n* **Invoice 90017**:\\n  * Period start: `2026-09-04`\\n  * Issued at: `2026-09-04 16:18:27 UTC`\\n  * Due at: `2026-09-11 16:18:27 UTC`\\n  * Amount: `$49.00` (4900 cents)\\n  * Status: `paid`\\n  * Paid at: `2026-09-29 16:18:27 UTC`\\n  * External ref: `ch_3QxR8sLkd2Z0aB17`\\n* **Invoice 90018 (Duplicate)**:\\n  * Period start: `2026-09-04`\\n  * Issued at: `2026-09-04 16:19:27 UTC` (issued exactly 60 seconds after 90017)\\n  * Due at: `2026-09-11 16:19:27 UTC`\\n  * Amount: `$49.00` (4900 cents)\\n  * Status: `open`\\n  * Paid at: `null`\\n* **Invoice 10987**:\\n  * Period start: `2026-10-04`, due `2026-10-06`, status `open` (not yet past due, within grace period).\\n\\n#### 2. Delinquency Logic (`src/billing.ts`)\\n```typescript\\nconst GRACE_DAYS = 14;\\n\\nexport async function isDelinquent(orgId: number): Promise<boolean> {\\n  const row = await db.maybeOne(sql`\\n    SELECT 1 FROM invoices\\n    WHERE org_id = ${orgId}\\n      AND status = 'open'\\n      AND due_at < now() - ${GRACE_DAYS} * interval '1 day'\\n    LIMIT 1`);\\n  return row !== null;\\n}\\n```\\nAn organization is delinquent if **any** invoice for the organization has `status = 'open'` and its due date is more than 14 days in the past (`due_at < now() - 14 days`).\\n\\n#### 3. Suspension Timeline\\n1. **Due Date**: Both invoices 90017 and 90018 had due dates of `2026-09-11`.\\n2.\n<truncated 1808 bytes>",
-  "conversation_id": "670f5c63-7bb3-4ec5-8d4f-b4192f81aa64",
-  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/670f5c63-7bb3-4ec5-8d4f-b4192f81aa64/.system_generated/logs/transcript.jsonl",
   "completed_at": "2026-10-04T16:20:05.998Z",
-  "wall_clock_seconds": 86
+  "conversation_id": "670f5c63-7bb3-4ec5-8d4f-b4192f81aa64",
+  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/670f5c63-7bb3-4ec5-8d4f-b4192f81aa64/.system_generated/logs/transcript.jsonl"
 }

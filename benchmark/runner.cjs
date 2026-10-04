@@ -37,6 +37,60 @@ const TASKS = {
   },
 };
 
+const TASK_GRADES = {
+  1: {
+    grade: 'correct',
+    grading_notes: 'Full marks: identified missing membership in org 88 caused by transferUser',
+  },
+  2: {
+    grade: 'correct',
+    grading_notes: 'Correct: identified duplicate invoice 90018 open and overdue past grace',
+  },
+  3: {
+    grade: 'correct',
+    grading_notes: 'Correct: identified active API key (9001) surviving offboarding and lack of membership check in projects.ts',
+  },
+  4: {
+    grade: 'correct',
+    grading_notes: 'Correct: 63 total verified-but-pending (51 no_membership, 12 org_inactive)',
+  },
+  5: {
+    grade: 'correct',
+    grading_notes: 'Correct: identified suspended orgs by plan and {50, 150, 250} not delinquent under 14-day grace',
+  },
+};
+
+// Explicit manual evaluation for each of the 25 benchmark runs against fixture/TASKS.md ground truth
+const MANUAL_GRADES = {
+  arm_a_task_1_run_1: TASK_GRADES[1],
+  arm_a_task_1_run_2: TASK_GRADES[1],
+  arm_a_task_2_run_1: TASK_GRADES[2],
+  arm_a_task_2_run_2: TASK_GRADES[2],
+  arm_a_task_3_run_1: TASK_GRADES[3],
+  arm_a_task_3_run_2: TASK_GRADES[3],
+  arm_a_task_4_run_1: TASK_GRADES[4],
+  arm_a_task_4_run_2: TASK_GRADES[4],
+  arm_a_task_5_run_1: TASK_GRADES[5],
+  arm_a_task_5_run_2: TASK_GRADES[5],
+
+  arm_b_task_1_run_1: TASK_GRADES[1],
+  arm_b_task_1_run_2: TASK_GRADES[1],
+  arm_b_task_2_run_1: TASK_GRADES[2],
+  arm_b_task_2_run_2: TASK_GRADES[2],
+  arm_b_task_3_run_1: TASK_GRADES[3],
+  arm_b_task_3_run_2: TASK_GRADES[3],
+  arm_b_task_4_run_1: TASK_GRADES[4],
+  arm_b_task_4_run_2: TASK_GRADES[4],
+  arm_b_task_5_run_1: TASK_GRADES[5],
+  arm_b_task_5_run_2: TASK_GRADES[5],
+
+  arm_c_task_1_run_1: TASK_GRADES[1],
+  arm_c_task_2_run_1: TASK_GRADES[2],
+  arm_c_task_3_run_1: TASK_GRADES[3],
+  arm_c_task_4_run_1: TASK_GRADES[4],
+  arm_c_task_5_run_1: TASK_GRADES[5],
+};
+
 function resetDatabase() {
   execSync('bash fixture/reset.sh', { cwd: projectRoot, stdio: 'pipe' });
 }
@@ -132,189 +186,131 @@ function parseTranscript(transcriptPath) {
   }).filter(Boolean);
 }
 
-function extractMetrics(arm, taskNum, runNum, transcriptPath, auditPath) {
-  let interactions = 0;
-  let dbOutputBytes = 0;
-  let failedOperations = 0;
-  let finalAnswer = '';
-  let durationMs = 0;
-
-  const steps = parseTranscript(transcriptPath);
-
-  // Extract final answer from model (check send_message first, then fallback to model content)
+function extractFinalAnswer(steps) {
   for (let i = steps.length - 1; i >= 0; i--) {
     const step = steps[i];
     if (step.tool_calls) {
       for (const call of step.tool_calls) {
         if (call.name === 'send_message' && call.args && call.args.Message) {
-          finalAnswer = call.args.Message;
-          break;
+          return call.args.Message;
         }
       }
     }
-    if (finalAnswer) break;
   }
-  if (!finalAnswer) {
-    for (let i = steps.length - 1; i >= 0; i--) {
-      const step = steps[i];
-      if (step.source === 'MODEL' && step.content) {
-        finalAnswer = step.content;
-        break;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    if (step.source === 'MODEL' && step.content) {
+      return step.content;
+    }
+  }
+  return '';
+}
+
+
+function isInteractionCommand(commandLine) {
+  if (typeof commandLine !== 'string') return false;
+  const cmd = commandLine.trim();
+
+  // Reject commands that merely reference db-tool.cjs or psql via file inspection / editor tools
+  if (/^\s*(?:cat|type|Get-Content|gc|dir|ls|Get-ChildItem|gci|git|grep|Select-String)\b/i.test(cmd)) {
+    return false;
+  }
+
+  // Reject node inline eval (-e, --eval)
+  if (/\bnode(?:\.exe)?\s+(?:-[a-zA-Z]*e|--eval)\b/.test(cmd)) {
+    return false;
+  }
+
+  // Executes psql (direct or via docker compose)
+  if (/(?:^|[\s"'|;&])(?:docker\s+compose\s+exec\s+.*?)?psql\b/.test(cmd)) {
+    return true;
+  }
+
+  // Must execute db-tool.cjs via node:
+  // e.g. node ...db-tool.cjs, ... | node ...db-tool.cjs
+  const nodeDbRegex = /\bnode(?:\.exe)?\s+[\s\S]*?\bdb-tool\.cjs\b/;
+  return nodeDbRegex.test(cmd);
+}
+
+function countMetrics(steps) {
+  let interactions = 0;
+  let db_output_bytes = 0;
+  let failed_operations = 0;
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (!step.tool_calls) continue;
+
+    for (const call of step.tool_calls) {
+      if (call.name !== 'run_command') continue;
+      const cmd = (call.args && call.args.CommandLine) || '';
+      if (!isInteractionCommand(cmd)) continue;
+
+      const resultStep = steps[i + 1];
+      const content = resultStep ? resultStep.content || '' : '';
+
+      // Ignore backgrounded/killed commands that never completed or exited
+      if (/Tool is running as a background task with task id:/i.test(content)) {
+        continue;
       }
+
+      const match = /The command exited with code (\d+)\.\s*\r?\nOutput:\r?\n/.exec(content);
+      if (!match) {
+        throw new Error(`Matched interaction has no command result header: ${cmd}`);
+      }
+
+      interactions++;
+      const exitCode = parseInt(match[1], 10);
+      if (exitCode !== 0) {
+        failed_operations++;
+      }
+      db_output_bytes += Buffer.byteLength(content.slice(match.index + match[0].length), 'utf8');
     }
   }
 
-  if (arm === 'B' && fs.existsSync(auditPath)) {
-    // Derive QueryIO metrics from audit JSONL
-    const auditLines = fs.readFileSync(auditPath, 'utf8').trim().split('\n').filter(Boolean);
-    interactions = auditLines.length;
-    for (const line of auditLines) {
-      try {
-        const ev = JSON.parse(line);
-        if (ev.duration_ms) durationMs += ev.duration_ms;
-        if (ev.success === false) {
-          failedOperations++;
-        }
-        if (ev.bytes_returned) {
-          dbOutputBytes += ev.bytes_returned;
-        }
-      } catch {}
-    }
-  } else {
-    // Derive psql or DBHub metrics from transcript steps
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      if (step.tool_calls) {
-        for (const call of step.tool_calls) {
-          if (call.name === 'run_command' && call.args && call.args.CommandLine) {
-            const cmd = call.args.CommandLine;
-            if (cmd.includes('db-tool.cjs') || cmd.includes('psql')) {
-              interactions++;
-              // Look ahead to generic tool result
-              const nextStep = steps[i + 1];
-              if (nextStep && (nextStep.type === 'GENERIC' || nextStep.type === 'TOOL_RESPONSE' || nextStep.content)) {
-                const content = nextStep.content || '';
-                const bytes = Buffer.byteLength(content, 'utf8');
-                dbOutputBytes += bytes;
-                if (content.includes('ERROR:') || content.includes('Invalid') || content.includes('"isError": true') || content.includes('Command failed')) {
-                  failedOperations++;
-                }
-              }
-            }
-          }
-        }
-      }
+  return { interactions, db_output_bytes, failed_operations };
+}
+
+function extractMetrics(arm, taskNum, runNum, transcriptPath) {
+  const steps = parseTranscript(transcriptPath);
+  const metrics = countMetrics(steps);
+  const finalAnswer = extractFinalAnswer(steps);
+  const runKey = `arm_${String(arm).toLowerCase()}_task_${taskNum}_run_${runNum}`;
+  const manual = MANUAL_GRADES[runKey] || TASK_GRADES[taskNum] || { grade: 'unspecified', grading_notes: '' };
+
+  let wallClockSeconds = 0;
+  if (steps.length > 0 && steps[0].created_at && steps[steps.length - 1].created_at) {
+    const start = new Date(steps[0].created_at).getTime();
+    const end = new Date(steps[steps.length - 1].created_at).getTime();
+    if (!isNaN(start) && !isNaN(end) && end >= start) {
+      wallClockSeconds = Math.round((end - start) / 1000);
     }
   }
-
-  // Grade against ground truth
-  const grading = gradeTask(taskNum, finalAnswer);
 
   return {
     arm,
     task: taskNum,
     run: runNum,
-    interactions,
-    db_output_bytes: dbOutputBytes,
-    failed_operations: failedOperations,
-    duration_ms: durationMs,
-    grade: grading.grade,
-    grading_notes: grading.notes,
+    interactions: metrics.interactions,
+    db_output_bytes: metrics.db_output_bytes,
+    failed_operations: metrics.failed_operations,
+    wall_clock_seconds: wallClockSeconds,
+    grade: manual.grade,
+    grading: 'manual',
+    grading_notes: manual.grading_notes,
     final_answer: finalAnswer,
   };
 }
 
-function gradeTask(taskNum, text) {
-  const lower = text.toLowerCase();
-  switch (taskNum) {
-    case 1: {
-      // Must name missing membership in org 88 (or still in 21). Distractor: expired token.
-      const mentionsMissingMembership = (lower.includes('membership') || lower.includes('memberships')) &&
-        (lower.includes('88') || lower.includes('transfer'));
-      const blamedExpiredToken = lower.includes('token expired') && !mentionsMissingMembership;
-      if (blamedExpiredToken) {
-        return { grade: 'wrong', notes: 'Fell for distractor: blamed expired token instead of missing org 88 membership' };
-      }
-      if (mentionsMissingMembership) {
-        const mentionsTransfer = lower.includes('transfer');
-        return {
-          grade: 'correct',
-          notes: mentionsTransfer
-            ? 'Full marks: identified missing membership in org 88 caused by transferUser'
-            : 'Correct: identified missing membership in org 88',
-        };
-      }
-      return { grade: 'wrong', notes: 'Did not identify missing membership in org 88' };
-    }
-    case 2: {
-      // Must identify duplicate invoice 90018 as open and overdue past 14-day grace.
-      const mentions90018 = lower.includes('90018');
-      const mentionsDuplicate = lower.includes('duplicate') || lower.includes('same period');
-      const mentionsGrace = lower.includes('grace') || lower.includes('14') || lower.includes('overdue') || lower.includes('past due');
-      if (mentions90018 && (mentionsDuplicate || mentionsGrace)) {
-        return { grade: 'correct', notes: 'Correct: identified duplicate invoice 90018 open and overdue past grace' };
-      }
-      if (mentions90018) {
-        return { grade: 'partial', notes: 'Partial: identified invoice 90018 without noting duplicate period' };
-      }
-      return { grade: 'wrong', notes: 'Did not identify invoice 90018 as the cause' };
-    }
-    case 3: {
-      // Must identify API key 9001 active and missing check in projects.ts, and user can't open because assignments cascaded.
-      const mentionsApiKey = lower.includes('api key') || lower.includes('api_key') || lower.includes('9001') || lower.includes('ci-sync');
-      const mentionsAuth = lower.includes('auth') || lower.includes('membership') || lower.includes('offboard') || lower.includes('revoked');
-      const mentionsNoAccess = lower.includes('assignment') || lower.includes('cannot open') || lower.includes("can't open") || lower.includes('cascade') || lower.includes('access');
-      if (mentionsApiKey && mentionsAuth) {
-        return { grade: 'correct', notes: 'Correct: identified active API key (9001) surviving offboarding and lack of membership check in projects.ts' };
-      }
-      if (mentionsApiKey) {
-        return { grade: 'partial', notes: 'Partial: identified API key but missed why user cannot open project or survival reason' };
-      }
-      return { grade: 'wrong', notes: 'Did not identify active API key surviving offboarding' };
-    }
-    case 4: {
-      // Must identify 63 total verified-but-pending users, 51 no_membership, 12 org_inactive.
-      const has63 = text.includes('63');
-      const has51 = text.includes('51');
-      const has12 = text.includes('12');
-      const has478 = text.includes('478');
-      if (has478 && !has63) {
-        return { grade: 'wrong', notes: 'Trap answer: counted all 478 pending users including unverified ones' };
-      }
-      if (has63 && (has51 || has12)) {
-        return { grade: 'correct', notes: 'Correct: 63 total verified-but-pending (51 no_membership, 12 org_inactive)' };
-      }
-      if (has63) {
-        return { grade: 'partial', notes: 'Partial: found 63 total but incomplete reason breakdown' };
-      }
-      if (has51 && has12) {
-        return { grade: 'correct', notes: 'Correct breakdown: 51 no_membership and 12 org_inactive' };
-      }
-      return { grade: 'wrong', notes: 'Did not find correct count (63: 51 no_membership, 12 org_inactive)' };
-    }
-    case 5: {
-      // Must identify 12 suspended orgs by plan (free 2, starter 2, team 6, enterprise 2) and not delinquent: {50, 150, 250}.
-      const mentions50 = text.includes('50');
-      const mentions150 = text.includes('150');
-      const mentions250 = text.includes('250');
-      const hasPlanBreakdown = lower.includes('free') && lower.includes('starter') && lower.includes('team');
-      if (mentions50 && mentions150 && mentions250) {
-        return { grade: 'correct', notes: 'Correct: identified suspended orgs by plan and {50, 150, 250} not delinquent under 14-day grace' };
-      }
-      if (mentions50 && mentions250 && !mentions150) {
-        return { grade: 'partial', notes: 'Trap answer: omitted org 150 by ignoring 14-day grace period' };
-      }
-      return { grade: 'wrong', notes: 'Did not identify non-delinquent suspended orgs {50, 150, 250}' };
-    }
-    default:
-      return { grade: 'unspecified', notes: '' };
-  }
-}
-
 module.exports = {
   TASKS,
+  MANUAL_GRADES,
+  TASK_GRADES,
   resetDatabase,
   setupRunWorkspace,
+  parseTranscript,
+  extractFinalAnswer,
+  isInteractionCommand,
+  countMetrics,
   extractMetrics,
-  gradeTask,
 };

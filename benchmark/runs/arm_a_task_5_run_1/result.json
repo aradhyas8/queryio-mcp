@@ -3,14 +3,14 @@
   "task": 5,
   "run": 1,
   "interactions": 22,
-  "db_output_bytes": 34177,
+  "db_output_bytes": 31559,
   "failed_operations": 0,
-  "duration_ms": 0,
+  "wall_clock_seconds": 121,
   "grade": "correct",
+  "grading": "manual",
   "grading_notes": "Correct: identified suspended orgs by plan and {50, 150, 250} not delinquent under 14-day grace",
   "final_answer": "\"### Investigation Report: Suspended Organizations and Billing Delinquency\\n\\n#### 1. Executive Summary\\n- **Total Suspended Organizations:** 12\\n- **Suspended Organizations Broken Down by Plan:**\\n  - **Free:** 2 organizations\\n  - **Starter:** 2 organizations\\n  - **Team:** 6 organizations\\n  - **Enterprise:** 2 organizations\\n- **Suspended Organizations NOT Delinquent under `billing.ts`:**\\n  - **Workspace 50** (ID: `50`, Plan: `Team`)\\n  - **Workspace 150** (ID: `150`, Plan: `Team`)\\n  - **Workspace 250** (ID: `250`, Plan: `Team`)\\n\\n---\\n\\n#### 2. Rules in `src/billing.ts`\\nAccording to `src/billing.ts`:\\n- An organization is delinquent if it has any invoice where:\\n  - `status = 'open'`\\n  - `due_at < now() - interval '14 days'` (i.e., more than 14 grace days past due date).\\n- Draft, paid, and void invoices do not count.\\n\\n---\\n\\n#### 3. Breakdown of Suspended Organizations by Plan\\n\\n| Plan ID | Plan Code | Plan Name | Price (USD) | Suspended Count | Organization IDs |\\n|---------|-----------|-----------|-------------|-----------------|------------------|\\n| 1 | `free` | Free | $0.00 | 2 | 148, 296 |\\n| 2 | `starter` | Starter | $19.00 | 2 | 37, 185 |\\n| 3 | `team` | Team | $49.00 | 6 | 50, 74, 142, 150, 222, 250 |\\n| 4 | `enterprise` | Enterprise | $199.00 | 2 | 111, 259 |\\n| **Total** | | | | **12** | |\\n\\n---\\n\\n#### 4. Detailed Findings: Delinquency Status of Suspended Organizations\\n\\n##### A. Non-Delinquent Suspended Organizations (3 Organizations)\\nThese organizations are marked as `suspended` in `organizations` (and `past_due` in `subscriptions`), but **do not meet** the delinquency criteria in `billing.ts`:\\n\\n1. **Workspace 50** (ID: `50`, Plan: `Team`)\\n   - Open invoice: Invoice #`10343` (Amount: $49.00, Issued: `2026-09-29`, Due: `2026-10-06`).\\n   - Status: Not past due yet (due date is ~2 days in the future relative to DB timestamp `2026-10-04 16:46 UTC`).\\n   - Prior invoice #`10344` was paid on `2026-09-07`.\\n   - **Result:** `isDelinquent` returns `false`.\\n\\n2. **Workspace 150** (ID: `\n<truncated 2043 bytes>",
-  "conversation_id": "dad12b5b-4701-4441-a51d-cf0b95c6c263",
-  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/dad12b5b-4701-4441-a51d-cf0b95c6c263/.system_generated/logs/transcript.jsonl",
   "completed_at": "2026-10-04T16:48:05.643Z",
-  "wall_clock_seconds": 121
+  "conversation_id": "dad12b5b-4701-4441-a51d-cf0b95c6c263",
+  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/dad12b5b-4701-4441-a51d-cf0b95c6c263/.system_generated/logs/transcript.jsonl"
 }
