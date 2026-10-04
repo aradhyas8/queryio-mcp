@@ -25,7 +25,7 @@ it("starts the MCP stdio server from the packed tarball via npx and answers a qu
     command: "npx",
     args: ["-y", "--package", tarball, "queryio"],
     cwd: dir,
-    env: { ...(process.env as Record<string, string>), QUERYIO_DATABASE_URL: TEST_URL },
+    env: { ...(process.env as Record<string, string>), QUERYIO_DATABASE_URL: TEST_URL, QUERYIO_AUDIT_LOG: "off" },
   });
   const client = new Client({ name: "test", version: "0" });
   await client.connect(transport);
