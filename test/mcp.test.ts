@@ -40,6 +40,23 @@ it("lists list_tables and describe_tables with their input schemas", async () =>
   });
 });
 
+it("lists inspect_row with its input schema", async () => {
+  const { tools } = await client.listTools();
+  const inspect = tools.find((t) => t.name === "inspect_row");
+  expect(inspect?.inputSchema).toMatchObject({
+    type: "object",
+    properties: { table: { type: "string" }, key: { type: "object" } },
+    required: ["table", "key"],
+  });
+});
+
+it("reports an inspect_row failure as a structured tool error", async () => {
+  const result = await client.callTool({ name: "inspect_row", arguments: { table: "public.no_such_table", key: { id: 1 } } });
+  expect(result.isError).toBe(true);
+  const [text] = result.content as { type: string; text: string }[];
+  expect(JSON.parse(text.text).error).toMatchObject({ category: "not_found" });
+});
+
 it("returns describe_tables per-table errors as a successful call", async () => {
   const result = await client.callTool({ name: "describe_tables", arguments: { tables: ["public.no_such_table"] } });
   expect(result.isError).toBeFalsy();

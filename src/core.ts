@@ -20,6 +20,35 @@ export interface QueryResult {
   duration_ms: number;
 }
 
+/** One FK constraint's rows at depth 1 from an inspected row. */
+export interface Relation {
+  /** outgoing: the root row references these rows. incoming: these rows reference the root row. */
+  direction: "outgoing" | "incoming";
+  /** The related table, schema-qualified. */
+  table: string;
+  constraint: string;
+  /** Referencing columns, paired by position with the referenced target_columns, whatever the direction. */
+  source_columns: string[];
+  target_columns: string[];
+  status: "ok";
+  /** The related table's primary key, or ctid (physical position) without one. Never recency. */
+  order_by: string[];
+  columns: string[];
+  rows: unknown[][];
+  rows_returned: number;
+  has_more: boolean;
+}
+
+export interface InspectRowResult {
+  table: string;
+  columns: string[];
+  row: unknown[];
+  relations: Relation[];
+  values_truncated: number;
+  values_redacted: number;
+  duration_ms: number;
+}
+
 export interface TableNotFound {
   name: string;
   error: QueryError;
@@ -31,6 +60,8 @@ export interface Core {
   listTables(filter?: string): Promise<{ tables: catalog.TableSummary[] }>;
   /** Structure per requested schema-qualified name, in request order; unknown names get a per-table error. */
   describeTables(tables: string[]): Promise<{ tables: (catalog.TableStructure | TableNotFound)[] }>;
+  /** One row by its full primary key, plus up to N rows per declared FK constraint at depth 1. */
+  inspectRow(table: string, key: Record<string, unknown>): Promise<InspectRowResult>;
   close(): Promise<void>;
 }
 
@@ -119,7 +150,7 @@ export function createCore(settings: Settings): Core {
 
   async function runQuery(sql: string): Promise<QueryResult> {
     const started = performance.now();
-    const { maxRows, maxResponseBytes, maxValueLength } = settings;
+    const { maxRows, maxResponseBytes } = settings;
     assertReadOriented(sql);
     return await readOnly(async (client) => {
       // pg-cursor runs the statement as an extended-protocol portal, which rejects multiple statements.
@@ -152,18 +183,7 @@ export function createCore(settings: Settings): Core {
             truncatedBy = "rows";
             break read;
           }
-          let cuts = 0;
-          let hidden = 0;
-          // Redact first, so a hidden value is never truncated and only its marker is charged to the byte budget.
-          const row = raw.map((value, i) => {
-            if (redacted[i]) {
-              hidden++;
-              return REDACTED;
-            }
-            const shaped = truncateValue(value, maxValueLength);
-            if (shaped !== value) cuts++;
-            return shaped;
-          });
+          const { row, cuts, hidden } = shapeRow(raw, redacted);
           const size = Buffer.byteLength(JSON.stringify(row)) + 1; // + separating comma
           if (bytes + size > maxResponseBytes) {
             truncatedBy = "bytes";
@@ -185,6 +205,125 @@ export function createCore(settings: Settings): Core {
         truncated_by: truncatedBy,
         values_truncated: valuesTruncated,
         columns_redacted: redacted.filter(Boolean).length,
+        values_redacted: valuesRedacted,
+        duration_ms: Math.round(performance.now() - started),
+      };
+    });
+  }
+
+  /** Redact, then truncate: a hidden value is never truncated, and only its marker is charged to a byte budget. */
+  function shapeRow(raw: unknown[], redacted: boolean[]): { row: unknown[]; cuts: number; hidden: number } {
+    let cuts = 0;
+    let hidden = 0;
+    const row = raw.map((value, i) => {
+      if (redacted[i]) {
+        hidden++;
+        return REDACTED;
+      }
+      const shaped = truncateValue(value, settings.maxValueLength);
+      if (shaped !== value) cuts++;
+      return shaped;
+    });
+    return { row, cuts, hidden };
+  }
+
+  async function runInspectRow(table: string, key: Record<string, unknown>): Promise<InspectRowResult> {
+    const started = performance.now();
+    const limit = settings.inspectRelatedRows;
+    return await readOnly(async (client) => {
+      const root = (await catalog.describeTables(client, [table])).get(table);
+      if (!root) throw tableNotFound(table);
+      const pk = root.primary_key;
+      if (!pk) throw new QueryError("no_primary_key", "inspect_row requires a declared primary key; use query for this table");
+      const given = Object.keys(key);
+      if (given.length !== pk.length || !pk.every((c) => Object.hasOwn(key, c))) {
+        throw new QueryError(
+          "key_mismatch",
+          `key must name exactly the primary key columns of ${table}: ${pk.join(", ")}; got ${given.join(", ") || "none"}.`,
+        );
+      }
+
+      const fks = [
+        ...root.foreign_keys_out.map((fk) => ({ direction: "outgoing" as const, fk, related: fk.to_table })),
+        ...root.foreign_keys_in.map((fk) => ({ direction: "incoming" as const, fk, related: fk.from_table })),
+      ];
+      const relatedNames = [...new Set(fks.map((f) => f.related))].filter((n) => n !== table);
+      const structures = new Map([[table, root], ...(await catalog.describeTables(client, relatedNames))]);
+      // Every identifier in generated SQL comes from the catalog; every value is a bind parameter.
+      const parts = await catalog.nameParts(client, [table, ...relatedNames]);
+      const from = (name: string) => parts.get(name)!.map(ident).join(".");
+      const where = (columns: string[]) => columns.map((c, i) => `${ident(c)} = $${i + 1}`).join(" AND ");
+
+      // Fetched as raw text, so FK lookups bind exactly what Postgres printed; parsed for output as query does.
+      const found = await client.query<unknown[]>({
+        text: `SELECT * FROM ${from(table)} WHERE ${where(pk)}`,
+        values: pk.map((c) => key[c]),
+        rowMode: "array",
+        types: { getTypeParser: () => (text: string) => text },
+      } as pg.QueryArrayConfig);
+      if (found.rows.length === 0) {
+        throw new QueryError("row_not_found", `No row in ${table} has that key. Primary key columns: ${pk.join(", ")}.`);
+      }
+      const columns = found.fields.map((f) => f.name);
+      const text = new Map(columns.map((c, i) => [c, found.rows[0][i] as string | null]));
+      const parsed = found.rows[0].map((v, i) =>
+        v === null ? null : pg.types.getTypeParser(found.fields[i].dataTypeID, "text")(v as string),
+      );
+
+      let valuesTruncated = 0;
+      let valuesRedacted = 0;
+      const shape = (fields: pg.FieldDef[], rows: unknown[][]) => {
+        const redacted = fields.map((f) => isRedacted(f.name, settings.redactPatterns));
+        return rows.map((raw) => {
+          const { row, cuts, hidden } = shapeRow(raw, redacted);
+          valuesTruncated += cuts;
+          valuesRedacted += hidden;
+          return row;
+        });
+      };
+
+      const relations: Relation[] = [];
+      for (const { direction, fk, related } of fks) {
+        // Match the related table's side of the constraint against the root row's side.
+        const [match, rootColumns] = direction === "outgoing" ? [fk.to_columns, fk.from_columns] : [fk.from_columns, fk.to_columns];
+        const values = rootColumns.map((c) => text.get(c) ?? null);
+        // Without a primary key, physical position: stable within the snapshot, not across writes.
+        const orderBy = structures.get(related)?.primary_key ?? ["ctid"];
+        const entry: Relation = {
+          direction,
+          table: related,
+          constraint: fk.constraint,
+          source_columns: fk.from_columns,
+          target_columns: fk.to_columns,
+          status: "ok",
+          order_by: orderBy,
+          columns: [],
+          rows: [],
+          rows_returned: 0,
+          has_more: false,
+        };
+        relations.push(entry);
+        // A NULL in the key references nothing, as the FK itself treats it.
+        if (values.includes(null)) continue;
+        // N + 1 rows: the extra one only proves has_more. No COUNT(*).
+        const result = await client.query<unknown[]>({
+          text: `SELECT * FROM ${from(related)} WHERE ${where(match)}
+                 ORDER BY ${orderBy.map(ident).join(", ")} LIMIT ${limit + 1}`,
+          values,
+          rowMode: "array",
+        });
+        entry.columns = result.fields.map((f) => f.name);
+        entry.rows = shape(result.fields, result.rows.slice(0, limit));
+        entry.rows_returned = entry.rows.length;
+        entry.has_more = result.rows.length > limit;
+      }
+
+      return {
+        table,
+        columns,
+        row: shape(found.fields, [parsed])[0],
+        relations,
+        values_truncated: valuesTruncated,
         values_redacted: valuesRedacted,
         duration_ms: Math.round(performance.now() - started),
       };
@@ -228,16 +367,7 @@ export function createCore(settings: Settings): Core {
             table.columns = table.columns.map(shapeStats);
           }
           return {
-            tables: tables.map(
-              (name) =>
-                found.get(name) ?? {
-                  name,
-                  error: new QueryError(
-                    "not_found",
-                    `Table ${JSON.stringify(name)} not found. Pass a schema-qualified name as list_tables returns it, e.g. public.users.`,
-                  ),
-                },
-            ),
+            tables: tables.map((name) => found.get(name) ?? { name, error: tableNotFound(name) }),
           };
         },
         // Resolved tables only: requested names are tool arguments.
@@ -245,6 +375,20 @@ export function createCore(settings: Settings): Core {
           tables: result.tables.filter((t) => !("error" in t)).map((t) => t.name),
           tables_failed: result.tables.filter((t) => "error" in t).length,
           bytes_returned: Buffer.byteLength(JSON.stringify(result)),
+        }),
+      );
+    },
+    inspectRow(table, key) {
+      return audited(
+        "inspect_row",
+        {},
+        () => runInspectRow(table, key),
+        // Never the key: its values are row data.
+        (result) => ({
+          tables: [...new Set([result.table, ...result.relations.map((r) => r.table)])],
+          rows_returned: 1 + result.relations.reduce((n, r) => n + r.rows_returned, 0),
+          bytes_returned: Buffer.byteLength(JSON.stringify(result)),
+          values_truncated: result.values_truncated,
         }),
       );
     },
@@ -264,6 +408,18 @@ export function createCore(settings: Settings): Core {
     return column;
   }
 
+}
+
+function tableNotFound(name: string): QueryError {
+  return new QueryError(
+    "not_found",
+    `Table ${JSON.stringify(name)} not found. Pass a schema-qualified name as list_tables returns it, e.g. public.users.`,
+  );
+}
+
+/** Quote an identifier taken from the catalog. */
+function ident(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
 }
 
 function envelopeBytes(fields: pg.FieldDef[], maxRows: number): number {

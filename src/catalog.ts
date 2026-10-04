@@ -176,6 +176,17 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
   return new Map([...byOid.values()].map((t) => [t.name, t]));
 }
 
+/** Schema and table name, as stored, per schema-qualified name; matched exactly like describeTables. */
+export async function nameParts(client: pg.ClientBase, names: string[]): Promise<Map<string, [schema: string, table: string]>> {
+  const { rows } = await client.query<{ name: string; schema: string; table: string }>(
+    `SELECT ${QUALIFIED} AS name, n.nspname AS schema, c.relname AS table
+     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind IN ('r', 'p') AND ${QUALIFIED} = ANY($1::text[])`,
+    [names],
+  );
+  return new Map(rows.map((r) => [r.name, [r.schema, r.table]]));
+}
+
 /** Column names for a constraint's attnum array, in constraint order. */
 function attnames(rel: string, keys: string): string {
   return `ARRAY(SELECT a.attname::text FROM unnest(${keys}) WITH ORDINALITY k(attnum, i)

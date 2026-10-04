@@ -50,6 +50,21 @@ export function createServer(core: Core): McpServer {
     ({ tables }) => respond(core.describeTables(tables)),
   );
 
+  server.registerTool(
+    "inspect_row",
+    {
+      description:
+        "Fetch one row by its full primary key plus its depth-1 declared foreign-key neighborhood in one call. Each relation is one FK constraint: direction outgoing (rows the root references) or incoming (rows referencing the root), the related table, constraint, source_columns (referencing) paired by position with target_columns (referenced), status, and compact rows (columns once, rows as arrays). Each relation returns up to N rows (default 5) ordered by the related table's primary key (order_by; ctid without one), never by recency; has_more means more rows existed, with no count. Values are truncated and redacted as in query, totalled in values_truncated and values_redacted. Tables without a declared primary key need query instead.",
+      inputSchema: {
+        table: z.string().describe("Schema-qualified table name, e.g. public.users"),
+        key: z
+          .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+          .describe('Every primary key column and its value, e.g. {"id": 4821}. Pass integers beyond 2^53 as strings.'),
+      },
+    },
+    ({ table, key }) => respond(core.inspectRow(table, key)),
+  );
+
   return server;
 }
 

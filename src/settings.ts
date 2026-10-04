@@ -8,6 +8,8 @@ export interface Settings {
   readonly maxRows: number;
   readonly maxResponseBytes: number;
   readonly maxValueLength: number;
+  /** Rows returned per inspect_row relation. */
+  readonly inspectRelatedRows: number;
   /** Audit log path, or null when disabled. */
   readonly auditLog: string | null;
   readonly auditIncludeSql: boolean;
@@ -58,6 +60,7 @@ export function loadSettings(env: Record<string, string | undefined>): Settings 
     maxRows: positiveInt("QUERYIO_MAX_ROWS", 100),
     maxResponseBytes: positiveInt("QUERYIO_MAX_RESPONSE_BYTES", 32 * 1024),
     maxValueLength: positiveInt("QUERYIO_MAX_VALUE_LENGTH", 200),
+    inspectRelatedRows: positiveInt("QUERYIO_INSPECT_RELATED_ROWS", 5),
     auditLog: auditLog.toLowerCase() === "off" ? null : auditLog,
     auditIncludeSql: env.QUERYIO_AUDIT_INCLUDE_SQL === "true",
     redactPatterns: Object.freeze(redactPatterns),
