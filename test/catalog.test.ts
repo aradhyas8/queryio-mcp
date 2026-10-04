@@ -67,9 +67,9 @@ describe("describe_tables", () => {
       {
         name: "cat.orbit_users",
         columns: [
-          { name: "id", type: "integer", nullable: false },
-          { name: "email", type: "text", nullable: false },
-          { name: "manager_id", type: "integer", nullable: true },
+          { name: "id", type: "integer", nullable: false, stats_available: true, null_frac: 0, n_distinct: -1 },
+          { name: "email", type: "text", nullable: false, stats_available: true, null_frac: 0, n_distinct: -1 },
+          { name: "manager_id", type: "integer", nullable: true, stats_available: true, null_frac: 1, n_distinct: 0 },
         ],
         primary_key: ["id"],
         foreign_keys_out: [
@@ -147,6 +147,65 @@ describe("describe_tables", () => {
     expect(tables[1]).toMatchObject({ foreign_keys_out: [{ constraint: "event_refs_event_fk", to_table: "cat.events" }] });
     expect((tables[1] as { foreign_keys_out: unknown[] }).foreign_keys_out).toHaveLength(1);
     expect(tables[2]).toMatchObject({ foreign_keys_in: [{ constraint: "event_refs_event_fk" }] });
+  });
+
+  it("reports planner statistics per column, with common values only for enum-like, non-redacted columns", async () => {
+    await sql(`
+      DROP TABLE IF EXISTS cat.accounts;
+      -- Autovacuum must not analyze it before the never-analyzed assertion.
+      CREATE TABLE cat.accounts (id int PRIMARY KEY, status text, email text, token text, note text, label text)
+        WITH (autovacuum_enabled = off);
+      INSERT INTO cat.accounts
+        SELECT g, CASE WHEN g <= 720 THEN 'active' WHEN g <= 930 THEN 'pending' ELSE 'disabled' END,
+               'u' || g || '@x', CASE WHEN g % 2 = 0 THEN 'tok-a' ELSE 'tok-b' END,
+               CASE WHEN g % 4 = 0 THEN repeat('n', 300) END, repeat(chr(97 + g % 10), 150)
+        FROM generate_series(1, 1000) g;
+    `);
+    // Never analyzed: no statistics, and no zeros made up in their place.
+    const before = await core.describeTables(["cat.accounts"]);
+    expect((before.tables[0] as { columns: unknown[] }).columns).toContainEqual({
+      name: "status",
+      type: "text",
+      nullable: true,
+      stats_available: false,
+    });
+
+    await sql("ANALYZE cat.accounts");
+    const { tables } = await core.describeTables(["cat.accounts"]);
+    const columns = Object.fromEntries((tables[0] as { columns: { name: string }[] }).columns.map((c) => [c.name, c]));
+    expect(columns.status).toEqual({
+      name: "status",
+      type: "text",
+      nullable: true,
+      stats_available: true,
+      null_frac: 0,
+      n_distinct: 3,
+      common_values: [
+        { value: "active", frequency: 0.72 },
+        { value: "pending", frequency: 0.21 },
+        { value: "disabled", frequency: 0.07 },
+      ],
+    });
+    // High cardinality: shape only, no values.
+    expect(columns.email).toEqual({ name: "email", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: -1 });
+    // Matches a redaction pattern: enum-like, yet no values.
+    expect(columns.token).toEqual({ name: "token", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: 2 });
+    // Enum-like, but ten long values exceed the cap: shape only.
+    expect(columns.label).toEqual({ name: "label", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: 10 });
+    // Common values are truncated like any other value.
+    expect(columns.note).toMatchObject({ null_frac: 0.75, n_distinct: 1, common_values: [{ value: expect.stringMatching(/^n{200}…\[\+100B\]$/), frequency: 0.25 }] });
+  });
+
+  it("treats a small table's fractional n_distinct as enum-like", async () => {
+    await sql(`
+      DROP TABLE IF EXISTS cat.seeds;
+      CREATE TABLE cat.seeds (id int, status text);
+      INSERT INTO cat.seeds SELECT g, (ARRAY['a', 'b', 'c'])[g % 3 + 1] FROM generate_series(1, 20) g;
+      ANALYZE cat.seeds;
+    `);
+    const { tables } = await core.describeTables(["cat.seeds"]);
+    const status = (tables[0] as { columns: { name: string }[] }).columns.find((c) => c.name === "status");
+    expect(status).toMatchObject({ n_distinct: -0.15, common_values: expect.arrayContaining([{ value: "a", frequency: 0.3 }]) });
   });
 
   it("returns no primary key for a table without one", async () => {

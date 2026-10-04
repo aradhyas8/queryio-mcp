@@ -36,6 +36,9 @@ export interface Core {
 
 const BATCH_SIZE = 100;
 
+/** A column's common values are dropped whole when their serialized form exceeds this. */
+const MAX_COMMON_VALUES_BYTES = 1024;
+
 export const REDACTED = "[redacted]";
 
 /**
@@ -221,6 +224,9 @@ export function createCore(settings: Settings): Core {
         {},
         async () => {
           const found = await readOnly((client) => catalog.describeTables(client, tables));
+          for (const table of found.values()) {
+            for (const column of table.columns) shapeCommonValues(column);
+          }
           return {
             tables: tables.map(
               (name) =>
@@ -244,6 +250,17 @@ export function createCore(settings: Settings): Core {
     },
     close: () => pool.end(),
   };
+
+  /** Hide common values of redacted columns, truncate the rest, and drop them all when over the cap. */
+  function shapeCommonValues(column: catalog.Column): void {
+    if (!column.stats_available || !column.common_values) return;
+    if (isRedacted(column.name, settings.redactPatterns)) {
+      delete column.common_values;
+      return;
+    }
+    for (const cv of column.common_values) cv.value = truncateValue(cv.value, settings.maxValueLength);
+    if (Buffer.byteLength(JSON.stringify(column.common_values)) > MAX_COMMON_VALUES_BYTES) delete column.common_values;
+  }
 
 }
 
