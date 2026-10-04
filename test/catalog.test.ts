@@ -188,8 +188,8 @@ describe("describe_tables", () => {
     });
     // High cardinality: shape only, no values.
     expect(columns.email).toEqual({ name: "email", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: -1 });
-    // Matches a redaction pattern: enum-like, yet no values.
-    expect(columns.token).toEqual({ name: "token", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: 2 });
+    // Matches a redaction pattern: enum-like, yet no statistics at all, marked as hidden rather than missing.
+    expect(columns.token).toEqual({ name: "token", type: "text", nullable: true, stats_available: false, redacted: true });
     // Enum-like, but ten long values exceed the cap: shape only.
     expect(columns.label).toEqual({ name: "label", type: "text", nullable: true, stats_available: true, null_frac: 0, n_distinct: 10 });
     // Common values are truncated like any other value.
@@ -206,6 +206,21 @@ describe("describe_tables", () => {
     const { tables } = await core.describeTables(["cat.seeds"]);
     const status = (tables[0] as { columns: { name: string }[] }).columns.find((c) => c.name === "status");
     expect(status).toMatchObject({ n_distinct: -0.15, common_values: expect.arrayContaining([{ value: "a", frequency: 0.3 }]) });
+  });
+
+  it("returns bigint and numeric common values as exact strings, like query does", async () => {
+    await sql(`
+      DROP TABLE IF EXISTS cat.ledger;
+      CREATE TABLE cat.ledger (big bigint, amount numeric, n int);
+      INSERT INTO cat.ledger SELECT 9007199254740993, 0.10000000000000000001, 7 FROM generate_series(1, 50);
+      ANALYZE cat.ledger;
+    `);
+    const { tables } = await core.describeTables(["cat.ledger"]);
+    expect((tables[0] as { columns: unknown[] }).columns).toMatchObject([
+      { name: "big", common_values: [{ value: "9007199254740993", frequency: 1 }] },
+      { name: "amount", common_values: [{ value: "0.10000000000000000001", frequency: 1 }] },
+      { name: "n", common_values: [{ value: 7, frequency: 1 }] },
+    ]);
   });
 
   it("returns no primary key for a table without one", async () => {

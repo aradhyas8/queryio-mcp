@@ -225,7 +225,7 @@ export function createCore(settings: Settings): Core {
         async () => {
           const found = await readOnly((client) => catalog.describeTables(client, tables));
           for (const table of found.values()) {
-            for (const column of table.columns) shapeCommonValues(column);
+            table.columns = table.columns.map(shapeStats);
           }
           return {
             tables: tables.map(
@@ -251,15 +251,17 @@ export function createCore(settings: Settings): Core {
     close: () => pool.end(),
   };
 
-  /** Hide common values of redacted columns, truncate the rest, and drop them all when over the cap. */
-  function shapeCommonValues(column: catalog.Column): void {
-    if (!column.stats_available || !column.common_values) return;
+  /** Hide all statistics of redacted columns; truncate common values, and drop them all when over the cap. */
+  function shapeStats(column: catalog.Column): catalog.Column {
+    if (!column.stats_available) return column;
     if (isRedacted(column.name, settings.redactPatterns)) {
-      delete column.common_values;
-      return;
+      const { name, type, nullable } = column;
+      return { name, type, nullable, stats_available: false, redacted: true };
     }
+    if (!column.common_values) return column;
     for (const cv of column.common_values) cv.value = truncateValue(cv.value, settings.maxValueLength);
     if (Buffer.byteLength(JSON.stringify(column.common_values)) > MAX_COMMON_VALUES_BYTES) delete column.common_values;
+    return column;
   }
 
 }

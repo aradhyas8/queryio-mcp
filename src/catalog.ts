@@ -17,7 +17,8 @@ export type Column = { name: string; type: string; nullable: boolean } & ColumnS
 
 /** Planner statistics from pg_stats; never computed by scanning. Absent statistics are reported, never zeroed. */
 export type ColumnStats =
-  | { stats_available: false }
+  /** `redacted`: statistics exist but are hidden because the column matches a redaction pattern. */
+  | { stats_available: false; redacted?: true }
   | {
       stats_available: true;
       null_frac: number;
@@ -112,7 +113,11 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
       `SELECT a.attrelid AS oid, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, NOT a.attnotnull AS nullable,
               s.null_frac, s.n_distinct,
               CASE WHEN (CASE WHEN s.n_distinct < 0 THEN -s.n_distinct * c.reltuples ELSE s.n_distinct END)
-                          BETWEEN 1 AND ${ENUM_LIKE_MAX_DISTINCT} THEN array_to_json(s.most_common_vals) END AS common_vals,
+                          BETWEEN 1 AND ${ENUM_LIKE_MAX_DISTINCT}
+                   -- As text for bigint and numeric, like query returns them: JSON numbers would lose precision.
+                   THEN CASE WHEN a.atttypid IN ('int8'::regtype, 'numeric'::regtype)
+                             THEN to_json(s.most_common_vals::text::text[]) ELSE array_to_json(s.most_common_vals) END
+              END AS common_vals,
               s.most_common_freqs AS common_freqs
        FROM pg_attribute a
        JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
