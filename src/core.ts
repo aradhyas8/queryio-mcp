@@ -13,6 +13,9 @@ export interface QueryResult {
   has_more: boolean;
   truncated_by: "rows" | "bytes" | null;
   values_truncated: number;
+  /** Returned columns hidden by redaction; reported even when no rows come back. */
+  columns_redacted: number;
+  values_redacted: number;
   duration_ms: number;
 }
 
@@ -22,6 +25,16 @@ export interface Core {
 }
 
 const BATCH_SIZE = 100;
+
+export const REDACTED = "[redacted]";
+
+/**
+ * Whether a column's values are hidden: its name equals a pattern, ignoring case. The one place matching lives;
+ * tools must redact through it. Accidental-exposure prevention, not access control: `query` can rename columns.
+ */
+export function isRedacted(column: string, patterns: readonly string[]): boolean {
+  return patterns.includes(column.toLowerCase());
+}
 
 const READ_COMMANDS = ["SELECT", "WITH", "VALUES", "TABLE", "SHOW"];
 
@@ -102,6 +115,8 @@ export function createCore(settings: Settings): Core {
       let fields: pg.FieldDef[] = [];
       let bytes = 0;
       let valuesTruncated = 0;
+      let valuesRedacted = 0;
+      let redacted: boolean[] = [];
       let truncatedBy: QueryResult["truncated_by"] = null;
       // Never request more than max_rows + 1 rows in total: the extra row only proves has_more.
       read: for (;;) {
@@ -109,7 +124,10 @@ export function createCore(settings: Settings): Core {
           cursor.read(Math.min(BATCH_SIZE, maxRows + 1 - rows.length), (err, rows, result) => {
             if (err) return reject(err);
             // Once the portal is done, pg-cursor calls back without a result.
-            if (result) fields = result.fields;
+            if (result) {
+              fields = result.fields;
+              redacted = fields.map((f) => isRedacted(f.name, settings.redactPatterns));
+            }
             resolve(rows);
           }),
         );
@@ -122,7 +140,13 @@ export function createCore(settings: Settings): Core {
             break read;
           }
           let cuts = 0;
-          const row = raw.map((value) => {
+          let hidden = 0;
+          // Redact first, so a hidden value is never truncated and only its marker is charged to the byte budget.
+          const row = raw.map((value, i) => {
+            if (redacted[i]) {
+              hidden++;
+              return REDACTED;
+            }
             const shaped = truncateValue(value, maxValueLength);
             if (shaped !== value) cuts++;
             return shaped;
@@ -134,6 +158,7 @@ export function createCore(settings: Settings): Core {
           }
           bytes += size;
           valuesTruncated += cuts;
+          valuesRedacted += hidden;
           rows.push(row);
         }
       }
@@ -146,6 +171,8 @@ export function createCore(settings: Settings): Core {
         has_more: truncatedBy !== null,
         truncated_by: truncatedBy,
         values_truncated: valuesTruncated,
+        columns_redacted: redacted.filter(Boolean).length,
+        values_redacted: valuesRedacted,
         duration_ms: Math.round(performance.now() - started),
       };
     });
@@ -183,6 +210,8 @@ function envelopeBytes(fields: pg.FieldDef[], maxRows: number): number {
     has_more: false,
     truncated_by: "bytes",
     values_truncated: maxRows * fields.length,
+    columns_redacted: fields.length,
+    values_redacted: maxRows * fields.length,
     duration_ms: 1e9,
   };
   return Buffer.byteLength(JSON.stringify(widest));
