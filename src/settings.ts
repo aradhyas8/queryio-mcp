@@ -10,6 +10,10 @@ export interface Settings {
   readonly maxValueLength: number;
   /** Rows returned per inspect_row relation. */
   readonly inspectRelatedRows: number;
+  /** Maximum number of relations inspected in inspect_row before capping. */
+  readonly inspectMaxRelations: number;
+  /** Total server-side deadline for an inspect_row call in milliseconds. */
+  readonly inspectDeadlineMs: number;
   /** Audit log path, or null when disabled. */
   readonly auditLog: string | null;
   readonly auditIncludeSql: boolean;
@@ -61,6 +65,8 @@ export function loadSettings(env: Record<string, string | undefined>): Settings 
     maxResponseBytes: positiveInt("QUERYIO_MAX_RESPONSE_BYTES", 32 * 1024),
     maxValueLength: positiveInt("QUERYIO_MAX_VALUE_LENGTH", 200),
     inspectRelatedRows: positiveInt("QUERYIO_INSPECT_RELATED_ROWS", 5),
+    inspectMaxRelations: positiveInt("QUERYIO_INSPECT_MAX_RELATIONS", 25),
+    inspectDeadlineMs: positiveInt("QUERYIO_INSPECT_DEADLINE_MS", 5000),
     auditLog: auditLog.toLowerCase() === "off" ? null : auditLog,
     auditIncludeSql: env.QUERYIO_AUDIT_INCLUDE_SQL === "true",
     redactPatterns: Object.freeze(redactPatterns),

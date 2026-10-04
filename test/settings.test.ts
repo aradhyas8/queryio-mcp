@@ -4,15 +4,39 @@ import { loadSettings } from "../src/settings.js";
 const url = { QUERYIO_DATABASE_URL: "postgres://x" };
 
 it("defaults the limits and lets environment variables override them", () => {
-  expect(loadSettings(url)).toMatchObject({ maxRows: 100, maxResponseBytes: 32768, maxValueLength: 200, inspectRelatedRows: 5, auditIncludeSql: false });
-  expect(loadSettings({ ...url, QUERYIO_MAX_ROWS: "7", QUERYIO_LOCK_TIMEOUT_MS: "250" })).toMatchObject({
+  expect(loadSettings(url)).toMatchObject({
+    maxRows: 100,
+    maxResponseBytes: 32768,
+    maxValueLength: 200,
+    inspectRelatedRows: 5,
+    inspectMaxRelations: 25,
+    inspectDeadlineMs: 5000,
+    auditIncludeSql: false,
+  });
+  expect(
+    loadSettings({
+      ...url,
+      QUERYIO_MAX_ROWS: "7",
+      QUERYIO_LOCK_TIMEOUT_MS: "250",
+      QUERYIO_INSPECT_MAX_RELATIONS: "10",
+      QUERYIO_INSPECT_DEADLINE_MS: "3000",
+    }),
+  ).toMatchObject({
     maxRows: 7,
     lockTimeoutMs: 250,
+    inspectMaxRelations: 10,
+    inspectDeadlineMs: 3000,
   });
 });
 
 it.each(["0", "-1", "1.5", "lots"])("rejects a non-positive-integer limit %j", (value) => {
   expect(() => loadSettings({ ...url, QUERYIO_MAX_ROWS: value })).toThrow(/QUERYIO_MAX_ROWS must be a positive integer/);
+  expect(() => loadSettings({ ...url, QUERYIO_INSPECT_MAX_RELATIONS: value })).toThrow(
+    /QUERYIO_INSPECT_MAX_RELATIONS must be a positive integer/,
+  );
+  expect(() => loadSettings({ ...url, QUERYIO_INSPECT_DEADLINE_MS: value })).toThrow(
+    /QUERYIO_INSPECT_DEADLINE_MS must be a positive integer/,
+  );
 });
 
 it("defaults the redaction patterns and applies additions and removals", () => {
