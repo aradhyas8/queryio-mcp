@@ -45,16 +45,16 @@ Before wiring QueryIO into your agent, run the built-in preflight diagnostic:
 npx -y queryio check
 ```
 
-*(If testing locally before publishing: `npm pack && npx -y --package ./queryio-0.0.1.tgz queryio check`)*
+*(If testing locally before publishing: `npm pack && npx -y --package ./queryio-*.tgz queryio check`)*
 
 `queryio check` verifies:
 - Network connectivity and PostgreSQL server version
 - Connected database and connected role
 - Superuser status and table write privileges
-- Membership in dangerous predefined roles (`pg_execute_server_program`, `pg_read_server_files`, `pg_write_server_files`, `pg_write_all_data`)
+- Membership in dangerous predefined roles (`pg_execute_server_program`, `pg_read_server_files`, `pg_write_server_files`, `pg_write_all_data`, `pg_signal_backend`)
 - Planner statistics availability (`pg_stats`)
 - Active configuration limits, redaction rules, and audit log path
-- Privilege warnings, plus a ready-to-edit SQL template for creating a dedicated least-privilege role
+- Privilege warnings, plus a ready-to-edit SQL template for creating a dedicated read-only role
 
 ### 3. Add QueryIO to Your MCP Client
 
@@ -62,10 +62,14 @@ npx -y queryio check
 
 Add QueryIO using the Claude Code CLI:
 ```bash
+# Project scope (.mcp.json at repo root)
 claude mcp add queryio -e QUERYIO_DATABASE_URL="postgres://user:password@localhost:5432/my_database" -- npx -y queryio
+
+# User scope (~/.claude.json)
+claude mcp add -s user queryio -e QUERYIO_DATABASE_URL="postgres://user:password@localhost:5432/my_database" -- npx -y queryio
 ```
 
-Or configure it in your project's `.claude/mcp.json` or user `~/.claude/mcp.json`:
+Or configure it in your project's `.mcp.json` at the repository root, or user `~/.claude.json`:
 ```json
 {
   "mcpServers": {
@@ -101,11 +105,11 @@ codex mcp add queryio --env QUERYIO_DATABASE_URL="postgres://user:password@local
 Open your agent session and ask a forensic question about your data:
 > *"User 4821 says their account never activated. Find out why."*
 
-The agent will:
-1. Read the activation logic in your repository.
-2. Identify the relevant tables and inspect schema/statistics with `describe_tables`.
-3. Call `inspect_row` on `public.users` with `{"id": 4821}` to inspect the user record and its foreign-key neighborhood (tokens, accounts, events) in one call.
-4. Diagnose the mismatch between application logic and database state without running exploratory multi-table joins or polluting context.
+In typical investigation workflows, the agent will:
+- Read relevant application code in your repository to understand expected business logic and domain entities.
+- Inspect runtime database state—for instance, calling `inspect_row` on `public.users` with `{"id": 4821}` to retrieve the user record and its foreign-key neighborhood (memberships, events, tokens) in a single call.
+- Run targeted queries with `query` or check schema definitions with `list_tables` / `describe_tables` as needed.
+- Diagnose the mismatch between application logic and database state without exploratory multi-table joins or polluting turn context.
 
 ---
 
@@ -196,7 +200,39 @@ Bounded read-only SQL execution for aggregates, group-bys, and targeted forensic
   - `values_redacted`: Total count of cell values redacted.
   - `duration_ms`: Execution time in milliseconds.
   - `warnings`: Privilege warnings if applicable.
-- **Structured Errors**: Postgres errors are classified into categories (`syntax`, `permission`, `timeout`, `constraint`, `connection`, `generic`) with Postgres error codes and hints where available.
+- **Structured Errors**: See [Structured Error Contract](#structured-error-contract) below.
+
+### Structured Error Contract
+
+When any tool execution fails, QueryIO returns a tool result with the MCP error flag set (`isError: true`) and a structured payload shape `{ error: { category, code, message, hint }, warnings? }`:
+
+```json
+{
+  "error": {
+    "category": "timeout",
+    "code": "57014",
+    "message": "canceling statement due to statement timeout"
+  }
+}
+```
+
+*(Note: `code` and `hint` are included when provided by PostgreSQL; `warnings` is attached only if warnings were detected.)*
+
+Errors are mapped into deterministic, machine-readable categories:
+- **Specific condition categories**:
+  - `timeout`: Server-side statement timeout (`57014`) or total deadline reached.
+  - `lock_timeout`: Lock acquisition timeout waiting behind conflicting table locks (`55P03`).
+  - `read_only`: Write attempt in a read-only transaction (`25006`).
+- **PostgreSQL error classes**:
+  - When no specific condition applies, errors are named by their SQLSTATE class name (e.g. `syntax_error_or_access_rule_violation`, `integrity_constraint_violation`, `connection_exception`, `data_exception`, `insufficient_resources`), falling back to `postgres_error` for unrecognized SQLSTATE codes.
+- **Client errors**:
+  - `client_error`: Network failures, connection refused, or client-side errors lacking a SQLSTATE.
+- **QueryIO validation and boundary errors**:
+  - `read_oriented`: Non-read statements rejected by QueryIO's product-boundary gate (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `EXPLAIN`).
+  - `not_found`: Table name cannot be resolved in the PostgreSQL catalog.
+  - `no_primary_key`: `inspect_row` invoked on a table lacking a declared primary key.
+  - `key_mismatch`: `inspect_row` key argument missing primary key columns or supplying extraneous columns.
+  - `row_not_found`: `inspect_row` found no matching row for the specified primary key.
 
 ---
 
@@ -210,7 +246,7 @@ QueryIO is configured exclusively via environment variables; there are no config
 | `QUERYIO_STATEMENT_TIMEOUT_MS` | `5000` (5s) | Server-side `statement_timeout` set per transaction in PostgreSQL. |
 | `QUERYIO_LOCK_TIMEOUT_MS` | `1000` (1s) | Server-side `lock_timeout` set per transaction in PostgreSQL (prevents waiting behind exclusive locks). |
 | `QUERYIO_MAX_ROWS` | `100` | Maximum rows returned by `query`. |
-| `QUERYIO_MAX_RESPONSE_BYTES` | `32768` (32 KB) | Maximum serialized response size before retrieval stops (`truncated_by: "bytes"`). |
+| `QUERYIO_MAX_RESPONSE_BYTES` | `32768` (32 KB) | Maximum serialized response size before retrieval stops (`truncated_by: "bytes"`). Bounds `query` only. |
 | `QUERYIO_MAX_VALUE_LENGTH` | `200` | Character limit for individual column string values before truncation with `…[+size]`. |
 | `QUERYIO_INSPECT_RELATED_ROWS` | `5` | Maximum rows returned per relation in `inspect_row`. |
 | `QUERYIO_INSPECT_MAX_RELATIONS` | `25` | Maximum number of relations inspected before capping with reason `max_relations`. |
@@ -282,23 +318,29 @@ QueryIO provides defense-in-depth for database investigations, but security boun
 
 - **QueryIO is the safe default path, not a sandbox**: An agent that already has shell access and can read `DATABASE_URL` from `.env` or run `psql` directly can bypass QueryIO. QueryIO is the safe default path, not a sandbox or execution jail.
 - **Safety with Privileged Roles**: If connected with a superuser role, QueryIO cannot guarantee containment.
+- **Shared-Role Backend Termination**: A role shared with the application can terminate the application's backends via `pg_terminate_backend()` or `pg_cancel_backend()`.
+- **Extension & Foreign Connection Escapes**: `dblink` or foreign data wrapper (FDW) connections escape the read-only transaction and rollback guarantees.
 
-### The Superuser Warning & Dedicated Least-Privilege Role
+### The Superuser Warning & Dedicated Read-Only Role
 
 > [!WARNING]
 > **Connecting as a PostgreSQL superuser destroys the meaningful security boundary.**
 > Superusers bypass PostgreSQL permission checks and have access to server-side capabilities such as program execution (`COPY ... FROM PROGRAM`) and filesystem access.
 
-QueryIO allows connecting as a superuser with a clear warning so local development is not blocked, but for staging and production, you should **always** create a dedicated least-privilege read-only role.
+QueryIO allows connecting as a superuser with a clear warning so local development is not blocked, but for staging and production, you should **always** create a dedicated read-only role.
 
 Run `npx -y queryio check` to get a customized SQL script for your database, or run:
 
 ```sql
--- Dedicated read-only role for QueryIO
+-- Create dedicated read-only role for QueryIO:
 CREATE ROLE queryio_role WITH LOGIN PASSWORD 'CHANGE_ME_PASSWORD';
+-- ALTER ROLE queryio_role SET default_transaction_read_only = on additionally hardens the role.
 GRANT CONNECT ON DATABASE "your_database" TO queryio_role;
+-- Covers the public schema only and must be repeated per schema:
 GRANT USAGE ON SCHEMA public TO queryio_role;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO queryio_role;
+-- ALTER DEFAULT PRIVILEGES applies only to tables later created by the role that runs it;
+-- tables created by another owner (e.g. a migration user) need ALTER DEFAULT PRIVILEGES FOR ROLE <owner> ...
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO queryio_role;
 ```
 
@@ -325,23 +367,11 @@ QueryIO was evaluated in a 25-run benchmark suite across 3 arms:
 - **Arm B:** Autonomous coding agent + QueryIO
 - **Arm C:** Autonomous coding agent + DBHub (reference)
 
-The suite tested agents on 5 real-world debugging and analysis tasks against a 12,000-record seeded database (`acme` SaaS schema), with complete database resets between every run and strict workspace isolation.
+The suite tested agents on 5 real-world forensic debugging and aggregate tasks against a realistic 12,000-record seeded database (`acme` SaaS schema), with complete database resets before every run and strict workspace isolation.
 
-### Key Results Summary
+All three arms achieved 100% diagnostic accuracy. On forensic debugging tasks (Tasks 1–3), `inspect_row` delivered a **38.5% reduction in median context bytes** and an **18.8% reduction in median database interactions** compared to raw `psql`. On aggregate tasks (Tasks 4–5), median interactions (+2.3%) and median bytes (-0.2%) remained at near parity, though multi-query exploration and indented JSON output led to higher mean context bytes (+27.9%).
 
-| Task Category | Arm A (Raw `psql`) | Arm B (QueryIO) | Difference |
-| :--- | :---: | :---: | :---: |
-| **Forensic Tasks (1–3)** | 15.83 DB interactions | **11.00 DB interactions** | **-30.5% interactions** |
-| | 24,796 context bytes | **19,540 context bytes** | **-21.2% context bytes** |
-| | 27,511 median bytes | **12,841 median bytes** | **-53.3% median bytes** |
-| | 100% correct (6/6) | 100% correct (6/6) | Parity |
-| **Aggregate Tasks (4–5)** | 21.50 DB interactions | 22.25 DB interactions | +3.5% (no meaningful regression) |
-| | 27,390 context bytes | 30,724 context bytes | +12.2% (no meaningful regression) |
-| | 100% correct (4/4) | 100% correct (4/4) | Parity |
-
-On forensic debugging tasks, `inspect_row`'s depth-1 foreign key expansion reduced round-trip database queries by **30.5%** and cut median context consumption by **53.3%** while maintaining 100% diagnostic accuracy.
-
-For the full methodology, per-run breakdown tables, and analysis against the pre-declared win condition, see [BENCHMARK.md](file:///C:/Users/aradhya/Desktop/Ethan%20Personal%20Projects/queryio%20mcp/BENCHMARK.md).
+For the full methodology, experimental controls, disclosures, and per-run breakdown tables, see [BENCHMARK.md](BENCHMARK.md).
 
 ---
 
