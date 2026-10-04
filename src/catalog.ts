@@ -13,11 +13,23 @@ export interface TableSummary {
   columns: number;
 }
 
-export interface Column {
-  name: string;
-  type: string;
-  nullable: boolean;
-}
+export type Column = { name: string; type: string; nullable: boolean } & ColumnStats;
+
+/** Planner statistics from pg_stats; never computed by scanning. Absent statistics are reported, never zeroed. */
+export type ColumnStats =
+  /** `redacted`: statistics exist but are hidden because the column matches a redaction pattern. */
+  | { stats_available: false; redacted?: true }
+  | {
+      stats_available: true;
+      null_frac: number;
+      /** Positive: estimated distinct count. Negative: minus the distinct fraction of rows (-1 means unique). */
+      n_distinct: number;
+      /** Most common values, most frequent first; only fetched for enum-like columns. */
+      common_values?: { value: unknown; frequency: number }[];
+    };
+
+/** Columns with at most this many estimated distinct values count as enum-like. */
+const ENUM_LIKE_MAX_DISTINCT = 20;
 
 /** One FK constraint. Columns pair up by position: from_columns[i] references to_columns[i]. */
 export interface ForeignKey {
@@ -86,9 +98,32 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
   }
   const oids = [...byOid.keys()];
   if (oids.length > 0) {
-    const columns = await client.query<Column & { oid: number }>(
-      `SELECT a.attrelid AS oid, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, NOT a.attnotnull AS nullable
-       FROM pg_attribute a WHERE a.attrelid = ANY($1::oid[]) AND ${LIVE_COLUMN}
+    // A negative n_distinct is a fraction of rows, common on small tables; scale it by the row estimate.
+    // A partitioned table only has statistics over its partitions (inherited); a plain table's own are not.
+    const columns = await client.query<{
+      oid: number;
+      name: string;
+      type: string;
+      nullable: boolean;
+      null_frac: number | null;
+      n_distinct: number | null;
+      common_vals: unknown[] | null;
+      common_freqs: number[] | null;
+    }>(
+      `SELECT a.attrelid AS oid, a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type, NOT a.attnotnull AS nullable,
+              s.null_frac, s.n_distinct,
+              CASE WHEN (CASE WHEN s.n_distinct < 0 THEN -s.n_distinct * c.reltuples ELSE s.n_distinct END)
+                          BETWEEN 1 AND ${ENUM_LIKE_MAX_DISTINCT}
+                   -- As text for bigint and numeric, like query returns them: JSON numbers would lose precision.
+                   THEN CASE WHEN a.atttypid IN ('int8'::regtype, 'numeric'::regtype)
+                             THEN to_json(s.most_common_vals::text::text[]) ELSE array_to_json(s.most_common_vals) END
+              END AS common_vals,
+              s.most_common_freqs AS common_freqs
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+       LEFT JOIN pg_stats s ON s.schemaname = n.nspname AND s.tablename = c.relname AND s.attname = a.attname
+                            AND s.inherited = (c.relkind = 'p')
+       WHERE a.attrelid = ANY($1::oid[]) AND ${LIVE_COLUMN}
        ORDER BY a.attnum`,
       [oids],
     );
@@ -118,7 +153,16 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
        ORDER BY ic.relname`,
       [oids],
     );
-    for (const { oid, ...column } of columns.rows) byOid.get(oid)!.columns.push(column);
+    for (const { oid, name, type, nullable, null_frac, n_distinct, common_vals, common_freqs } of columns.rows) {
+      const column: Column =
+        null_frac === null || n_distinct === null
+          ? { name, type, nullable, stats_available: false }
+          : { name, type, nullable, stats_available: true, null_frac, n_distinct };
+      if (column.stats_available && common_vals && common_freqs) {
+        column.common_values = common_vals.map((value, i) => ({ value, frequency: Math.round(common_freqs[i] * 1000) / 1000 }));
+      }
+      byOid.get(oid)!.columns.push(column);
+    }
     for (const { kind, from_oid, to_oid, ...fk } of constraints.rows) {
       if (kind === "p") {
         byOid.get(from_oid)!.primary_key = fk.from_columns;

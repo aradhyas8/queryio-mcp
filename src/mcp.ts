@@ -42,7 +42,7 @@ export function createServer(core: Core): McpServer {
     "describe_tables",
     {
       description:
-        "Describe several tables in one call: columns (name, type, nullable), primary key, outgoing and incoming foreign keys (constraint, from_table/from_columns, to_table/to_columns, paired by position), and indexes. Unknown tables get a per-table error; the rest still succeed.",
+        "Describe several tables in one call: columns (name, type, nullable), primary key, outgoing and incoming foreign keys (constraint, from_table/from_columns, to_table/to_columns, paired by position), and indexes. Each column carries planner statistics (no scans): stats_available, and when true null_frac, n_distinct (negative = minus the distinct fraction of rows, -1 = unique) and, for enum-like non-sensitive columns, common_values with frequencies. Columns matching a redaction pattern get stats_available: false, redacted: true. Unknown tables get a per-table error; the rest still succeed.",
       inputSchema: {
         tables: z.array(z.string()).min(1).describe("Schema-qualified table names, e.g. public.users"),
       },
