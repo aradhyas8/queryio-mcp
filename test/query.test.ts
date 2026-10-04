@@ -82,6 +82,20 @@ describe("query", () => {
     expect((await core.query("SELECT count(*)::int AS n FROM widgets")).rows).toEqual([[2]]);
   });
 
+  it("releases session-level advisory locks before returning the connection to the pool", async () => {
+    const lockId = 424242;
+    await core.query(`SELECT pg_advisory_lock(${lockId})`);
+    const inspector = new pg.Client({ connectionString: TEST_URL });
+    await inspector.connect();
+    try {
+      const { rows } = await inspector.query("SELECT pg_try_advisory_lock($1) AS acquired", [lockId]);
+      expect(rows[0].acquired).toBe(true);
+      await inspector.query("SELECT pg_advisory_unlock_all()");
+    } finally {
+      await inspector.end();
+    }
+  });
+
   it("returns date and timestamp as exact text strings and leaves timestamptz unchanged", async () => {
     const result = await core.query(`
       SELECT

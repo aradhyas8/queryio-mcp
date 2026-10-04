@@ -190,7 +190,7 @@ export function createCore(settings: Settings): Core {
       return await work(client);
     } finally {
       try {
-        await client.query("ROLLBACK");
+        await client.query("ROLLBACK; SELECT pg_advisory_unlock_all()");
       } catch (err) {
         broken = err as Error;
       }
