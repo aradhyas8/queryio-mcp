@@ -241,3 +241,35 @@ it("audits tables involved, rows and bytes, never key values", async () => {
   expect(raw).not.toContain("zebra-key");
   expect(raw).not.toContain("missing-key");
 });
+
+it("keeps tables whose schema-qualified names would flatten alike apart (identity regression)", async () => {
+  await sql(`
+    DROP SCHEMA IF EXISTS "a.b", a CASCADE;
+    CREATE SCHEMA "a.b";
+    CREATE SCHEMA a;
+    CREATE TABLE "a.b".c (id int PRIMARY KEY, v text);
+    CREATE TABLE a."b.c" (id int PRIMARY KEY, v text, c_id int CONSTRAINT bc_c_fk REFERENCES "a.b".c (id));
+    INSERT INTO "a.b".c VALUES (1, 'schema a.b, table c');
+    INSERT INTO a."b.c" VALUES (1, 'schema a, table b.c', 1);
+  `);
+  // A part holding a dot is quoted, so the two names differ; the flat a.b.c names neither.
+  const listed = (await core.listTables()).tables.map((t) => t.name);
+  expect(listed).toEqual(expect.arrayContaining(['"a.b".c', 'a."b.c"']));
+  expect(listed).not.toContain("a.b.c");
+
+  const c = await core.inspectRow('"a.b".c', { id: 1 });
+  expect(c).toMatchObject({ table: '"a.b".c', row: [1, "schema a.b, table c"] });
+  expect(c.relations).toMatchObject([{ direction: "incoming", table: 'a."b.c"', constraint: "bc_c_fk", rows: [[1, "schema a, table b.c", 1]] }]);
+
+  const bc = await core.inspectRow('a."b.c"', { id: 1 });
+  expect(bc).toMatchObject({ table: 'a."b.c"', row: [1, "schema a, table b.c", 1] });
+  expect(bc.relations).toMatchObject([{ direction: "outgoing", table: '"a.b".c', rows: [[1, "schema a.b, table c"]] }]);
+
+  const { tables } = await core.describeTables(['"a.b".c', 'a."b.c"', "a.b.c"]);
+  expect(tables).toMatchObject([
+    { name: '"a.b".c', columns: [{ name: "id" }, { name: "v" }], foreign_keys_in: [{ from_table: 'a."b.c"', to_table: '"a.b".c' }] },
+    { name: 'a."b.c"', foreign_keys_out: [{ constraint: "bc_c_fk", to_table: '"a.b".c' }] },
+    { name: "a.b.c", error: { category: "not_found" } },
+  ]);
+  await expect(core.inspectRow("a.b.c", { id: 1 })).rejects.toMatchObject({ category: "not_found" });
+});

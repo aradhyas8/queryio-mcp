@@ -231,8 +231,9 @@ export function createCore(settings: Settings): Core {
     const started = performance.now();
     const limit = settings.inspectRelatedRows;
     return await readOnly(async (client) => {
-      const root = (await catalog.describeTables(client, [table])).get(table);
-      if (!root) throw tableNotFound(table);
+      const rootId = (await catalog.resolveTables(client, [table])).get(table);
+      if (!rootId) throw tableNotFound(table);
+      const root = (await catalog.describeTables(client, [rootId])).get(rootId.oid)!;
       const pk = root.primary_key;
       if (!pk) throw new QueryError("no_primary_key", "inspect_row requires a declared primary key; use query for this table");
       const given = Object.keys(key);
@@ -244,19 +245,18 @@ export function createCore(settings: Settings): Core {
       }
 
       const fks = [
-        ...root.foreign_keys_out.map((fk) => ({ direction: "outgoing" as const, fk, related: fk.to_table })),
-        ...root.foreign_keys_in.map((fk) => ({ direction: "incoming" as const, fk, related: fk.from_table })),
+        ...root.foreign_keys_out.map((fk) => ({ direction: "outgoing" as const, fk, related: fk.to })),
+        ...root.foreign_keys_in.map((fk) => ({ direction: "incoming" as const, fk, related: fk.from })),
       ];
-      const relatedNames = [...new Set(fks.map((f) => f.related))].filter((n) => n !== table);
-      const structures = new Map([[table, root], ...(await catalog.describeTables(client, relatedNames))]);
+      const relatedIds = [...new Map(fks.map((f) => [f.related.oid, f.related])).values()].filter((id) => id.oid !== rootId.oid);
+      const structures = new Map([[rootId.oid, root], ...(await catalog.describeTables(client, relatedIds))]);
       // Every identifier in generated SQL comes from the catalog; every value is a bind parameter.
-      const parts = await catalog.nameParts(client, [table, ...relatedNames]);
-      const from = (name: string) => parts.get(name)!.map(ident).join(".");
+      const from = (id: catalog.TableId) => `${ident(id.schema)}.${ident(id.table)}`;
       const where = (columns: string[]) => columns.map((c, i) => `${ident(c)} = $${i + 1}`).join(" AND ");
 
       // Fetched as raw text, so FK lookups bind exactly what Postgres printed; parsed for output as query does.
       const found = await client.query<unknown[]>({
-        text: `SELECT * FROM ${from(table)} WHERE ${where(pk)}`,
+        text: `SELECT * FROM ${from(rootId)} WHERE ${where(pk)}`,
         values: pk.map((c) => key[c]),
         rowMode: "array",
         types: { getTypeParser: () => (text: string) => text },
@@ -288,10 +288,10 @@ export function createCore(settings: Settings): Core {
         const [match, rootColumns] = direction === "outgoing" ? [fk.to_columns, fk.from_columns] : [fk.from_columns, fk.to_columns];
         const values = rootColumns.map((c) => text.get(c) ?? null);
         // Without a primary key, physical position: stable within the snapshot, not across writes.
-        const orderBy = structures.get(related)?.primary_key ?? ["ctid"];
+        const orderBy = structures.get(related.oid)?.primary_key ?? ["ctid"];
         const entry: Relation = {
           direction,
-          table: related,
+          table: catalog.qualifiedName(related.schema, related.table),
           constraint: fk.constraint,
           source_columns: fk.from_columns,
           target_columns: fk.to_columns,
@@ -362,12 +362,18 @@ export function createCore(settings: Settings): Core {
         "describe_tables",
         {},
         async () => {
-          const found = await readOnly((client) => catalog.describeTables(client, tables));
+          const [ids, found] = await readOnly(async (client) => {
+            const ids = await catalog.resolveTables(client, tables);
+            return [ids, await catalog.describeTables(client, [...ids.values()])] as const;
+          });
           for (const table of found.values()) {
             table.columns = table.columns.map(shapeStats);
           }
           return {
-            tables: tables.map((name) => found.get(name) ?? { name, error: tableNotFound(name) }),
+            tables: tables.map((name) => {
+              const id = ids.get(name);
+              return id ? catalog.present(found.get(id.oid)!) : { name, error: tableNotFound(name) };
+            }),
           };
         },
         // Resolved tables only: requested names are tool arguments.

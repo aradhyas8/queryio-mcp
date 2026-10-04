@@ -2,9 +2,33 @@ import type pg from "pg";
 
 /**
  * QueryIO's one model of tables, keys and foreign-key constraints, read from the PostgreSQL catalog.
- * Table names are always schema-qualified as `schema.table`, exactly as stored (no quoting).
- * ponytail: names containing dots can collide (`"a.b".c` vs `a."b.c"`); carry schema and table separately if that bites.
+ * A table's identity is its TableId. The schema-qualified name (qualifiedName) is only how agents see and pass it.
  */
+
+/** A table's identity: its catalog OID, with schema and table name exactly as stored. */
+export interface TableId {
+  oid: number;
+  schema: string;
+  table: string;
+}
+
+/**
+ * The name agents see and pass: `schema.table` as stored, with a part double-quoted (quotes doubled) only when it
+ * holds a dot or a double quote. Distinct tables never share a name: `"a.b".c` and `a."b.c"` differ.
+ */
+export function qualifiedName(schema: string, table: string): string {
+  const part = (p: string) => (/[."]/.test(p) ? `"${p.replaceAll('"', '""')}"` : p);
+  return `${part(schema)}.${part(table)}`;
+}
+
+/** Inverse of qualifiedName: null for any string it would not produce, such as `"public"."users"` or `a.b.c`. */
+export function parseQualifiedName(name: string): [schema: string, table: string] | null {
+  const m = /^("(?:[^"]|"")*"|[^."]*)\.("(?:[^"]|"")*"|[^."]*)$/.exec(name);
+  if (!m) return null;
+  const unquote = (p: string) => (p.startsWith('"') ? p.slice(1, -1).replaceAll('""', '"') : p);
+  const [schema, table] = [unquote(m[1]), unquote(m[2])];
+  return qualifiedName(schema, table) === name ? [schema, table] : null;
+}
 
 export interface TableSummary {
   name: string;
@@ -60,12 +84,29 @@ export interface TableStructure {
   indexes: Index[];
 }
 
-const QUALIFIED = "n.nspname || '.' || c.relname";
+/** A ForeignKey with the identities of both its tables. */
+export interface ForeignKeyRef extends ForeignKey {
+  from: TableId;
+  to: TableId;
+}
+
+/** A TableStructure with the identities of it and its related tables; present() turns it into what agents see. */
+export interface Table extends TableStructure {
+  id: TableId;
+  foreign_keys_out: ForeignKeyRef[];
+  foreign_keys_in: ForeignKeyRef[];
+}
+
+export function present({ id, foreign_keys_out, foreign_keys_in, ...rest }: Table): TableStructure {
+  const strip = ({ from, to, ...fk }: ForeignKeyRef): ForeignKey => fk;
+  return { ...rest, foreign_keys_out: foreign_keys_out.map(strip), foreign_keys_in: foreign_keys_in.map(strip) };
+}
+
 const LIVE_COLUMN = "a.attnum > 0 AND NOT a.attisdropped";
 
 export async function listTables(client: pg.ClientBase, filter?: string): Promise<TableSummary[]> {
-  const { rows } = await client.query<TableSummary>(
-    `SELECT ${QUALIFIED} AS name,
+  const { rows } = await client.query<Omit<TableSummary, "name"> & { schema: string; table: string }>(
+    `SELECT n.nspname AS schema, c.relname AS table,
             CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::float8 END AS estimated_rows,
             (SELECT count(*)::int FROM pg_attribute a WHERE a.attrelid = c.oid AND ${LIVE_COLUMN}) AS columns
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -75,26 +116,41 @@ export async function listTables(client: pg.ClientBase, filter?: string): Promis
             OR strpos(lower(c.relname), lower($1)) > 0
             OR EXISTS (SELECT 1 FROM pg_attribute a
                        WHERE a.attrelid = c.oid AND ${LIVE_COLUMN} AND strpos(lower(a.attname), lower($1)) > 0))
-     ORDER BY 1`,
+     ORDER BY n.nspname || '.' || c.relname -- sort order only, never identity`,
     [filter ?? null],
   );
-  return rows;
+  return rows.map(({ schema, table, ...summary }) => ({ name: qualifiedName(schema, table), ...summary }));
 }
 
 /**
- * Describe tables by schema-qualified name. Names are matched exactly against the catalog, never parsed or
- * interpolated, so any string is safe to pass. Unknown names are absent from the returned map.
+ * Resolve schema-qualified names to table identities. A name is parsed, never interpolated, and matched exactly
+ * against the catalog, so any string is safe to pass. Unknown or non-canonical names are absent from the map.
  */
-export async function describeTables(client: pg.ClientBase, names: string[]): Promise<Map<string, TableStructure>> {
-  const { rows: found } = await client.query<{ oid: number; name: string }>(
-    `SELECT c.oid, ${QUALIFIED} AS name
+export async function resolveTables(client: pg.ClientBase, names: string[]): Promise<Map<string, TableId>> {
+  const parsed = names.map(parseQualifiedName).filter((p) => p !== null);
+  const { rows } = await client.query<TableId>(
+    `SELECT c.oid, n.nspname AS schema, c.relname AS table
      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('r', 'p') AND ${QUALIFIED} = ANY($1::text[])`,
-    [names],
+     WHERE c.relkind IN ('r', 'p')
+       AND (n.nspname::text, c.relname::text) IN (SELECT * FROM unnest($1::text[], $2::text[]))`,
+    [parsed.map(([schema]) => schema), parsed.map(([, table]) => table)],
   );
-  const byOid = new Map<number, TableStructure>();
-  for (const { oid, name } of found) {
-    byOid.set(oid, { name, columns: [], primary_key: null, foreign_keys_out: [], foreign_keys_in: [], indexes: [] });
+  return new Map(rows.map((id) => [qualifiedName(id.schema, id.table), id]));
+}
+
+/** Describe resolved tables, keyed by OID. */
+export async function describeTables(client: pg.ClientBase, ids: TableId[]): Promise<Map<number, Table>> {
+  const byOid = new Map<number, Table>();
+  for (const id of ids) {
+    byOid.set(id.oid, {
+      id,
+      name: qualifiedName(id.schema, id.table),
+      columns: [],
+      primary_key: null,
+      foreign_keys_out: [],
+      foreign_keys_in: [],
+      indexes: [],
+    });
   }
   const oids = [...byOid.keys()];
   if (oids.length > 0) {
@@ -129,11 +185,22 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
     );
     // Skip the per-partition clones Postgres adds to the same table for an FK to a partitioned table. Constraints a
     // partition inherits from its parent belong to the partition and stay.
-    const constraints = await client.query<ForeignKey & { kind: "p" | "f"; from_oid: number; to_oid: number }>(
+    const constraints = await client.query<{
+      constraint: string;
+      kind: "p" | "f";
+      from_oid: number;
+      from_schema: string;
+      from_rel: string;
+      from_columns: string[];
+      to_oid: number;
+      to_schema: string;
+      to_rel: string;
+      to_columns: string[];
+    }>(
       `SELECT con.conname AS constraint, con.contype AS kind,
-              con.conrelid AS from_oid, fn.nspname || '.' || fc.relname AS from_table,
+              con.conrelid AS from_oid, fn.nspname AS from_schema, fc.relname AS from_rel,
               ${attnames("con.conrelid", "con.conkey")} AS from_columns,
-              con.confrelid AS to_oid, tn.nspname || '.' || tc.relname AS to_table,
+              con.confrelid AS to_oid, tn.nspname AS to_schema, tc.relname AS to_rel,
               ${attnames("con.confrelid", "con.confkey")} AS to_columns
        FROM pg_constraint con
        JOIN pg_class fc ON fc.oid = con.conrelid JOIN pg_namespace fn ON fn.oid = fc.relnamespace
@@ -163,28 +230,28 @@ export async function describeTables(client: pg.ClientBase, names: string[]): Pr
       }
       byOid.get(oid)!.columns.push(column);
     }
-    for (const { kind, from_oid, to_oid, ...fk } of constraints.rows) {
-      if (kind === "p") {
-        byOid.get(from_oid)!.primary_key = fk.from_columns;
+    for (const c of constraints.rows) {
+      if (c.kind === "p") {
+        byOid.get(c.from_oid)!.primary_key = c.from_columns;
         continue;
       }
-      byOid.get(from_oid)?.foreign_keys_out.push(fk);
-      byOid.get(to_oid)?.foreign_keys_in.push(fk);
+      const from = { oid: c.from_oid, schema: c.from_schema, table: c.from_rel };
+      const to = { oid: c.to_oid, schema: c.to_schema, table: c.to_rel };
+      const fk: ForeignKeyRef = {
+        constraint: c.constraint,
+        from_table: qualifiedName(from.schema, from.table),
+        from_columns: c.from_columns,
+        to_table: qualifiedName(to.schema, to.table),
+        to_columns: c.to_columns,
+        from,
+        to,
+      };
+      byOid.get(from.oid)?.foreign_keys_out.push(fk);
+      byOid.get(to.oid)?.foreign_keys_in.push(fk);
     }
     for (const { oid, ...index } of indexes.rows) byOid.get(oid)!.indexes.push(index);
   }
-  return new Map([...byOid.values()].map((t) => [t.name, t]));
-}
-
-/** Schema and table name, as stored, per schema-qualified name; matched exactly like describeTables. */
-export async function nameParts(client: pg.ClientBase, names: string[]): Promise<Map<string, [schema: string, table: string]>> {
-  const { rows } = await client.query<{ name: string; schema: string; table: string }>(
-    `SELECT ${QUALIFIED} AS name, n.nspname AS schema, c.relname AS table
-     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind IN ('r', 'p') AND ${QUALIFIED} = ANY($1::text[])`,
-    [names],
-  );
-  return new Map(rows.map((r) => [r.name, [r.schema, r.table]]));
+  return byOid;
 }
 
 /** Column names for a constraint's attnum array, in constraint order. */
