@@ -152,7 +152,10 @@ function markdown(s) {
   for (const c of s.fairness_audit) row([c.check, c.ok ? "pass" : "FAIL", c.detail]);
   if (s.invalid_attempts.length) {
     L.push("", "## Invalid attempts (excluded)", "");
-    for (const i of s.invalid_attempts) L.push(`- ${i.run_key} (attempt ${i.attempt}): ${i.problems.join("; ")}`);
+    const byReason = {};
+    for (const i of s.invalid_attempts) (byReason[i.problems.join("; ")] ??= []).push(`${i.run_key}#${i.attempt}`);
+    for (const [reason, keys] of Object.entries(byReason).sort()) L.push(`- ${keys.length} x ${reason}: ${keys.length > 6 ? `${keys.slice(0, 6).join(", ")}, ...` : keys.join(", ")}`);
+    L.push("", "Each invalid attempt was re-run; only valid attempts are counted above. Full list in summary.json.");
   }
   if (s.missing_runs.length) L.push("", `Missing runs: ${s.missing_runs.join(", ")}`);
   return L.join("\n") + "\n";
