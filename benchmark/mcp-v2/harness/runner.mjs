@@ -67,8 +67,10 @@ for (const item of manifest.plan) {
 }
 const total = groups.reduce((n, g) => n + g.items.length, 0);
 let finished = 0;
+let rateLimited = null;
 const templates = {};
 for (const group of groups) {
+  if (rateLimited) break;
   // One template per group (keeps disk use to one template plus one clone per arm). Its content must
   // match the digest recorded the first time this task was built in this experiment.
   const name = await buildTemplate(group.task_id);
@@ -82,9 +84,14 @@ for (const group of groups) {
   templates[group.task_id] = { name, digest: fp.digest };
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(parallelArms, group.items.length) }, async () => {
-    while (next < group.items.length) {
+    while (next < group.items.length && !rateLimited) {
       const item = group.items[next++];
       const record = await executeRun(item);
+      // A usage/rate limit is an infrastructure stop, not a result: record nothing and end the invocation.
+      if (record.outcome.api_error_status === 429) {
+        rateLimited = record.outcome.api_error_message ?? "429";
+        continue;
+      }
       appendFileSync(runsFile, JSON.stringify(record) + "\n");
       finished++;
       const m = record.metrics;
@@ -93,6 +100,10 @@ for (const group of groups) {
     }
   }));
   await dropDatabase(name);
+}
+if (rateLimited) {
+  console.error(`[run] stopped: API rate/usage limit (${rateLimited}). Resume with: node benchmark/mcp-v2/harness/runner.mjs --resume "${expDir}"`);
+  process.exit(3);
 }
 console.log(`[run] done: ${expDir}`);
 
@@ -239,7 +250,7 @@ async function executeRun(item) {
     started_at: startedAt,
     ended_at: endedAt,
     answer_id: answerId,
-    outcome: { timed_out: agent.timedOut, exit_code: agent.exitCode, result_subtype: res?.subtype ?? null, max_turns_hit: res?.subtype === "error_max_turns", answer_chars: answer.length },
+    outcome: { timed_out: agent.timedOut, exit_code: agent.exitCode, result_subtype: res?.subtype ?? null, max_turns_hit: res?.subtype === "error_max_turns", answer_chars: answer.length, api_error_status: res?.api_error_status ?? null, api_error_message: res?.is_error ? (res.result ?? null) : null },
     metrics: {
       wall_ms: agent.wallMs,
       agent_turns: res?.num_turns ?? null,

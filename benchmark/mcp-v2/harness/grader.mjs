@@ -43,19 +43,39 @@ const SCHEMA = {
 };
 
 mkdirSync(join(expDir, "grades"), { recursive: true });
-const answers = readdirSync(join(expDir, "answers")).filter((f) => f.endsWith(".json")).sort();
-const todo = answers.filter((f) => opts.regrade || !existsSync(join(expDir, "grades", f)));
+// Only answers from valid runs are graded (latest attempt per run key); nothing else from runs.jsonl
+// reaches the grader.
+const latest = {};
+if (existsSync(join(expDir, "runs.jsonl"))) {
+  for (const line of readFileSync(join(expDir, "runs.jsonl"), "utf8").split("\n").filter(Boolean)) {
+    const r = JSON.parse(line);
+    latest[r.run_key] = r;
+  }
+}
+const validAnswers = new Set(Object.values(latest).filter((r) => r.validity.valid).map((r) => `${r.answer_id}.json`));
+const answers = readdirSync(join(expDir, "answers")).filter((f) => validAnswers.has(f)).sort();
+const hasVerdict = (f) => existsSync(join(expDir, "grades", f)) && readJson(join(expDir, "grades", f)).verdict;
+const todo = answers.filter((f) => opts.regrade || !hasVerdict(f));
+let rateLimited = false;
 console.log(`[grade] ${todo.length} of ${answers.length} answers to grade with ${config.model}`);
 let next = 0;
 await Promise.all(Array.from({ length: Number(opts.concurrency) }, async () => {
-  while (next < todo.length) {
+  while (next < todo.length && !rateLimited) {
     const file = todo[next++];
     const { answer_id, task_id, answer } = readJson(join(expDir, "answers", file));
     const grade = await gradeOne(answer_id, task_id, answer);
+    if (grade === "rate-limited") {
+      rateLimited = true;
+      break;
+    }
     writeFileSync(join(expDir, "grades", file), JSON.stringify(grade, null, 2) + "\n");
     console.log(`[grade] ${answer_id} ${task_id}: ${grade.verdict}`);
   }
 }));
+if (rateLimited) {
+  console.error("[grade] stopped: API rate/usage limit. Re-run the grader later; finished grades are kept.");
+  process.exit(3);
+}
 
 async function gradeOne(answerId, taskId, answer) {
   const t = truth[taskId].expected;
@@ -78,6 +98,7 @@ async function gradeOne(answerId, taskId, answer) {
       cwd: mkdtempSync(join(os.tmpdir(), "qio-grader-")),
       timeoutMs: config.timeout_seconds * 1000,
     });
+    if (res.result?.api_error_status === 429) return "rate-limited";
     const out = res.result?.structured_output;
     if (out && SCHEMA.required.every((k) => k in out)) {
       return { ...base, grader: `llm:${config.model}`, grader_effort: config.effort, prompt_sha256: sha256(prompt), ...out, raw_result: res.result };
