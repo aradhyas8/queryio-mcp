@@ -7,7 +7,7 @@ import os from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { ARMS } from "../configs/arms.mjs";
-import { claudeArgs, claudeVersion, runClaude } from "./agent.mjs";
+import { MCP_STARTUP_TIMEOUT_SEC, codexArgs, codexAuthMethod, codexVersion, runCodex } from "./agent.mjs";
 import {
   BENCH_DIR, RESULTS_DIR, closeSandboxSessions, createSandbox, dropDatabase, dropStaleSandboxes, dropSandbox, fingerprint, gitInfo, fileSha256,
   opaqueId, readJson, rng, run, sandboxWrites, serverVersions, sha256, shuffle, withClient, REPO_DIR,
@@ -46,7 +46,8 @@ if (!opts.resume) {
   throw new Error("task suite changed since this experiment started; refusing to resume");
 }
 for (const d of ["runs", "answers"]) mkdirSync(join(expDir, d), { recursive: true });
-console.log(`[run] experiment ${manifest.experiment_id}: ${manifest.plan.length} runs, model ${manifest.agent.model}`);
+if (manifest.agent.executor !== "codex") throw new Error(`experiment was run with ${manifest.agent.executor ?? manifest.agent.cli}; this runner only executes Codex experiments`);
+console.log(`[run] experiment ${manifest.experiment_id}: ${manifest.plan.length} runs, Codex ${manifest.agent.model} (${manifest.agent.effort})`);
 
 const runsFile = join(expDir, "runs.jsonl");
 const done = new Set(
@@ -86,17 +87,28 @@ for (const group of groups) {
   await Promise.all(Array.from({ length: Math.min(parallelArms, group.items.length) }, async () => {
     while (next < group.items.length && !rateLimited) {
       const item = group.items[next++];
-      const record = await executeRun(item);
-      // A usage/rate limit is an infrastructure stop, not a result: record nothing and end the invocation.
-      if (record.outcome.api_error_status === 429) {
-        rateLimited = record.outcome.api_error_message ?? "429";
-        continue;
+      let record;
+      // Rate/usage limits and lost connectivity are infrastructure, not results: nothing is recorded.
+      // Rate limits and network failures are retried with backoff; a usage limit (or one that persists)
+      // ends the invocation.
+      for (let retry = 0; ; retry++) {
+        record = await executeRun(item);
+        const kind = record.outcome.error_kind;
+        if (!["rate_limit", "usage_limit", "network"].includes(kind)) break;
+        if (kind === "usage_limit" || retry >= manifest.agent.max_rate_limit_retries) {
+          rateLimited = record.outcome.error_message ?? kind;
+          break;
+        }
+        const waitS = 60 * 2 ** retry;
+        console.log(`[run] ${item.run_key}: ${kind}, retrying in ${waitS}s`);
+        await new Promise((r) => setTimeout(r, waitS * 1000));
       }
+      if (rateLimited) continue;
       appendFileSync(runsFile, JSON.stringify(record) + "\n");
       finished++;
       const m = record.metrics;
       console.log(`[run] ${finished}/${total} ${item.run_key} ${record.validity.valid ? "valid" : `INVALID (${record.validity.problems.join("; ")})`} ` +
-        `calls=${m.mcp_tool_calls} sql=${m.sql_statements} wall=${Math.round(m.wall_ms / 1000)}s turns=${m.agent_turns ?? "?"}`);
+        `calls=${m.mcp_tool_calls} sql=${m.sql_statements} wall=${Math.round(m.wall_ms / 1000)}s out_tokens=${m.output_tokens ?? "?"}${record.validity.warnings.length ? ` warn: ${record.validity.warnings.join("; ")}` : ""}`);
     }
   }));
   await dropDatabase(name);
@@ -138,10 +150,13 @@ async function newManifest() {
     adventureworks: readJson(join(BENCH_DIR, "adventureworks", "source.json")),
     postgres: { version: pgVersion, image_id: image },
     agent: {
-      cli: config.agent.cli, cli_version: claudeVersion(config.agent.cli), model: config.agent.model, effort: config.agent.effort,
-      max_turns: config.agent.max_turns, timeout_seconds: config.agent.timeout_seconds,
-      args_template: claudeArgs({ ...config.agent, maxTurns: config.agent.max_turns, systemPrompt: "<prompts/system.txt>", mcpConfigPath: "<per-run mcp-config.json>", allowedTools: "mcp__database" }),
+      executor: "codex", cli: "codex", cli_version: codexVersion(), auth_method: codexAuthMethod(),
+      model: config.agent.model, effort: config.agent.effort, max_turns: null, timeout_seconds: config.agent.timeout_seconds,
+      max_rate_limit_retries: config.agent.max_rate_limit_retries,
+      args_template: codexArgs({ model: config.agent.model, effort: config.agent.effort, developerInstructions: "<prompts/system.txt>", mcp: { command: "<mcp-recorder wrapping the arm's server>" }, lastMessagePath: "<run>/last-message.txt" }),
+      session_isolation: "fresh CODEX_HOME per session (auth.json only), --ephemeral, --ignore-user-config, --ignore-rules, empty working directory",
     },
+    grader: { executor: "codex", model: config.grader.model, effort: config.grader.effort },
     prompts: { system_sha256: sha256(systemPrompt), task_template_sha256: sha256(taskTemplate), task_sha256: Object.fromEntries(tasks.map((t) => [t, sha256(taskPrompt(t))])) },
     task_suite: { hash: suiteHash(), tasks: tasks.length },
     tasks,
@@ -181,20 +196,19 @@ async function executeRun(item) {
   const launch = ARMS[item.arm].launch({ ...sb, privDir: runDir });
   const meta = { run_id: `${manifest.experiment_id}/${item.run_key}`, task_id: item.task_id, arm: item.arm, repetition: item.repetition, server_version: manifest.servers[item.arm === "postgres-mcp" ? "postgres_mcp" : item.arm] ?? null };
   const eventsFile = join(runDir, "mcp-events.jsonl");
-  const mcpConfigPath = join(runDir, "mcp-config.json");
-  writeFileSync(mcpConfigPath, JSON.stringify({
-    mcpServers: { database: { command: process.execPath, args: [join(BENCH_DIR, "harness", "mcp-recorder.mjs"), "--events", eventsFile, "--meta", JSON.stringify(meta), "--", launch.command, ...launch.args], env: launch.env } },
-  }, null, 2));
+  const mcp = { command: process.execPath, args: [join(BENCH_DIR, "harness", "mcp-recorder.mjs"), "--events", eventsFile, "--meta", JSON.stringify(meta), "--", launch.command, ...launch.args], env: launch.env };
+  writeFileSync(join(runDir, "mcp-config.json"), JSON.stringify({ mcp_servers: { database: mcp } }, null, 2));
 
   const agentCwd = mkdtempSync(join(os.tmpdir(), "qio-agent-"));
   const startedAt = new Date().toISOString();
-  const agent = await runClaude({
-    cli: manifest.agent.cli,
-    args: claudeArgs({ model: manifest.agent.model, effort: manifest.agent.effort, maxTurns: manifest.agent.max_turns, systemPrompt, mcpConfigPath, allowedTools: "mcp__database" }),
+  const lastMessagePath = join(runDir, "last-message.txt");
+  const agent = await runCodex({
+    args: codexArgs({ model: manifest.agent.model, effort: manifest.agent.effort, developerInstructions: systemPrompt, mcp, lastMessagePath }),
     prompt,
     cwd: agentCwd,
     timeoutMs: manifest.agent.timeout_seconds * 1000,
     transcriptPath: join(runDir, "transcript.jsonl"),
+    lastMessagePath,
   });
   const endedAt = new Date().toISOString();
   writeFileSync(join(runDir, "agent-stderr.log"), agent.stderr);
@@ -212,28 +226,41 @@ async function executeRun(item) {
   const events = existsSync(eventsFile) ? readFileSync(eventsFile, "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
   const calls = events.filter((e) => e.kind === "tool_call");
   const serverInfo = events.find((e) => e.kind === "server_info")?.server_info ?? null;
-  const agentToolUses = agent.messages.filter((m) => m.type === "assistant").flatMap((m) => m.message?.content ?? []).filter((b) => b.type === "tool_use");
-  const res = agent.result;
+  // Item types a database-only investigation may produce. Shell, file, and web items mean a disabled tool
+  // was reachable (invalid); anything else unexpected (e.g. sub-agent collaboration) is a warning.
+  const ALLOWED = new Set(["agent_message", "reasoning", "mcp_tool_call", "todo_list", "error"]);
+  const FORBIDDEN = /command|file|patch|web|search|image|browser/;
+  const otherItems = [...new Set(agent.items.map((i) => i.type).filter((t) => !ALLOWED.has(t)))];
 
   // Validity: any failed invariant excludes the run from results (it stays in runs.jsonl, flagged).
   if (writes !== 0) problems.push(`${writes} rows written`);
-  if (!agent.init) problems.push("agent session did not start");
-  else {
-    const extra = (agent.init.tools ?? []).filter((t) => !t.startsWith("mcp__database__"));
-    if (extra.length) problems.push(`agent had non-database tools: ${extra.join(", ")}`);
-    if (!(agent.init.mcp_servers ?? []).some((s) => s.name === "database" && s.status === "connected")) problems.push("MCP server not connected");
-    if (agent.init.model !== manifest.agent.model) problems.push(`model ${agent.init.model} != ${manifest.agent.model}`);
-  }
-  const models = Object.keys(res?.modelUsage ?? {});
-  if (models.some((m) => m !== manifest.agent.model)) problems.push(`other models used: ${models.join(", ")}`);
-  if (!agent.timedOut && !res) problems.push(`agent exited ${agent.exitCode} without a result`);
-  if (res?.is_error && res.subtype !== "error_max_turns") problems.push(`agent error: ${res.subtype} ${res.api_error_status ?? ""}`.trim());
+  if (!agent.sessionId) problems.push("agent session did not start");
+  if (!serverInfo) problems.push("MCP server not connected");
+  // Codex gives the model no tools from a server whose handshake (spawn to tools/list reply) outlasts the
+  // startup timeout, and says nothing; the recorder's timestamps are the only evidence.
+  const at = (e) => (e ? Date.parse(e.ts) : NaN);
+  const listReq = events.find((e) => e.method === "tools/list");
+  const listRes = listReq && events.find((e) => e.direction === "server_to_client" && e.id === listReq.id && at(e) >= at(listReq));
+  const mcpStartupMs = listRes ? at(listRes) - at(events.find((e) => e.kind === "proxy_start")) : null;
+  if (mcpStartupMs === null || !(mcpStartupMs < (MCP_STARTUP_TIMEOUT_SEC - 10) * 1000)) problems.push(`MCP tools not listed within the startup timeout (${mcpStartupMs ?? "never"} ms)`);
+  const forbidden = otherItems.filter((t) => FORBIDDEN.test(t));
+  if (forbidden.length) problems.push(`agent used non-database tools: ${forbidden.join(", ")}`);
+  const builtins = otherItems.filter((t) => !FORBIDDEN.test(t));
+  if (builtins.length) warnings.push(`agent used built-in tools: ${builtins.join(", ")}`);
+  // Codex's own "codex" server only lists MCP resources (none exist); any other server is a leak.
+  const dbCalls = agent.mcpCalls.filter((c) => c.server === "database");
+  const codexCalls = agent.mcpCalls.filter((c) => c.server === "codex");
+  if (codexCalls.length) warnings.push(`agent called Codex built-in MCP tools: ${[...new Set(codexCalls.map((c) => c.tool))].join(", ")}`);
+  const foreign = agent.mcpCalls.filter((c) => c.server !== "database" && c.server !== "codex");
+  if (foreign.length) problems.push(`MCP calls to other servers: ${[...new Set(foreign.map((c) => c.server))].join(", ")}`);
+  if (!agent.timedOut && agent.exitCode !== 0) problems.push(`agent exited ${agent.exitCode}`);
+  if (agent.error && !agent.timedOut) problems.push(`agent error (${agent.error.kind}): ${agent.error.message.slice(0, 200)}`);
   if (!events.some((e) => e.kind === "proxy_start")) problems.push("MCP recorder did not start");
-  if (agentToolUses.length !== calls.length) problems.push(`agent made ${agentToolUses.length} tool calls but the recorder saw ${calls.length}`);
+  if (dbCalls.length !== calls.length) problems.push(`agent made ${dbCalls.length} database tool calls but the recorder saw ${calls.length}`);
   if (sha256(prompt) !== manifest.prompts.task_sha256[item.task_id]) problems.push("prompt differs from the manifest");
   if (calls.length > 0 && sql.length === 0) warnings.push("tool calls but no SQL recorded");
 
-  const answer = res?.result ?? "";
+  const answer = agent.timedOut ? "" : agent.answer;
   const answerId = opaqueId(8);
   writeFileSync(join(expDir, "answers", `${answerId}.json`), JSON.stringify({ answer_id: answerId, task_id: item.task_id, answer }, null, 2) + "\n");
 
@@ -250,29 +277,35 @@ async function executeRun(item) {
     started_at: startedAt,
     ended_at: endedAt,
     answer_id: answerId,
-    outcome: { timed_out: agent.timedOut, exit_code: agent.exitCode, result_subtype: res?.subtype ?? null, max_turns_hit: res?.subtype === "error_max_turns", answer_chars: answer.length, api_error_status: res?.api_error_status ?? null, api_error_message: res?.is_error ? (res.result ?? null) : null },
+    outcome: { timed_out: agent.timedOut, exit_code: agent.exitCode, answer_chars: answer.length, error_kind: agent.error?.kind ?? null, error_message: agent.error?.message ?? null },
     metrics: {
       wall_ms: agent.wallMs,
-      agent_turns: res?.num_turns ?? null,
+      agent_turns: null, // not exposed by codex exec --json
       mcp_tool_calls: calls.length,
       mcp_failed_calls: calls.filter((c) => !c.ok).length,
+      mcp_startup_ms: mcpStartupMs,
       mcp_request_bytes: sum(calls, "request_bytes"),
       mcp_response_bytes: sum(calls, "response_bytes"),
       mcp_calls_by_tool: Object.fromEntries([...new Set(calls.map((c) => c.tool))].sort().map((t) => [t, calls.filter((c) => c.tool === t).length])),
       ...sqlM,
       ...pgss,
-      input_tokens: res?.usage ? (res.usage.input_tokens ?? 0) + (res.usage.cache_read_input_tokens ?? 0) + (res.usage.cache_creation_input_tokens ?? 0) : null,
-      output_tokens: res?.usage?.output_tokens ?? null,
-      cost_usd: res?.total_cost_usd ?? null,
+      // Codex input_tokens already include cached_input_tokens.
+      input_tokens: agent.usage?.input_tokens ?? null,
+      cached_input_tokens: agent.usage?.cached_input_tokens ?? null,
+      output_tokens: agent.usage?.output_tokens ?? null,
+      reasoning_output_tokens: agent.usage?.reasoning_output_tokens ?? null,
     },
     environment: {
       database_digest: fp.digest,
       template_digest: template.digest,
       rows_written: writes,
       server_info: serverInfo,
-      agent_session_id: agent.init?.session_id ?? null,
-      agent_cli_version: agent.init?.claude_code_version ?? null,
-      agent_tools: agent.init?.tools ?? null,
+      agent_executor: manifest.agent.executor,
+      agent_session_id: agent.sessionId,
+      agent_cli_version: manifest.agent.cli_version,
+      agent_model: manifest.agent.model,
+      agent_effort: manifest.agent.effort,
+      agent_item_types: [...new Set(agent.items.map((i) => i.type))].sort(),
       prompt_sha256: sha256(prompt),
       system_prompt_sha256: sha256(systemPrompt),
     },

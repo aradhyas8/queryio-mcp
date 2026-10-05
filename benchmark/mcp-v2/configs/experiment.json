@@ -1,14 +1,14 @@
 {
   "agent": {
-    "cli": "claude",
-    "model": "claude-sonnet-5-5",
-    "effort": "medium",
-    "max_turns": 60,
-    "timeout_seconds": 900
+    "executor": "codex",
+    "model": "gpt-6-luna",
+    "effort": "max",
+    "timeout_seconds": 1800,
+    "max_rate_limit_retries": 3
   },
   "grader": {
-    "cli": "claude",
-    "model": "claude-opus-5-5",
+    "executor": "codex",
+    "model": "gpt-6-luna",
     "effort": "high",
     "timeout_seconds": 600
   },
@@ -35,6 +35,14 @@
     "trial": {
       "tasks": [
         "sales-e01"
+      ],
+      "repetitions": 1
+    },
+    "codex-smoke": {
+      "tasks": [
+        "sales-e01",
+        "inv-m04",
+        "inv-h02"
       ],
       "repetitions": 1
     }

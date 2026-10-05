@@ -10,6 +10,8 @@ import { loadPrivateManifest } from "./tasks.mjs";
 const expDir = resolve(process.argv[2] ?? "");
 if (!process.argv[2] || !existsSync(join(expDir, "manifest.json"))) throw new Error("usage: report.mjs <results dir>");
 const manifest = readJson(join(expDir, "manifest.json"));
+// Experiments before the Codex switch have no agent.executor and ran on Claude Code.
+const codex = manifest.agent.executor === "codex";
 const truth = loadPrivateManifest();
 const attempts = existsSync(join(expDir, "runs.jsonl")) ? readFileSync(join(expDir, "runs.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(JSON.parse) : [];
 const grades = Object.fromEntries(
@@ -46,6 +48,7 @@ const METRICS = [
   ["agent_turns", "Agent turns"],
   ["input_tokens", "Input tokens (incl. cache)"],
   ["output_tokens", "Output tokens"],
+  ["reasoning_output_tokens", "Reasoning tokens (part of output)"],
 ];
 const dist = (rs, k) => {
   const xs = rs.map((r) => r.metrics[k]);
@@ -64,7 +67,8 @@ const summary = {
   provenance: {
     created_at: manifest.created_at, os: manifest.os, benchmark_commit: manifest.benchmark_commit, queryio: manifest.queryio, servers: manifest.servers,
     adventureworks: { conversion: manifest.adventureworks.conversion.repository, commit: manifest.adventureworks.conversion.commit, data_sha256: manifest.adventureworks.data.sha256 },
-    postgres: manifest.postgres, agent: manifest.agent, task_suite: manifest.task_suite, repetitions: manifest.repetitions, seed: manifest.seed,
+    postgres: manifest.postgres, agent: { executor: codex ? "codex" : "claude-code", ...manifest.agent }, grader: manifest.grader ?? null, task_suite: manifest.task_suite, repetitions: manifest.repetitions, seed: manifest.seed,
+    status: manifest.status ?? null, status_note: manifest.status_note ?? null,
   },
   counts: { planned: manifest.plan.length, completed: runs.length, valid: valid.length, graded: graded.length, invalid_attempts: invalid.length, missing: missing.length },
   correctness: byArm(valid, correctness),
@@ -97,9 +101,16 @@ function audit() {
   add("byte-identical task prompt across arms (per task)", tasks.every((t) => new Set(valid.filter((r) => r.task_id === t).map((r) => r.environment.prompt_sha256)).size === 1));
   add("identical system prompt", new Set(valid.map((r) => r.environment.system_prompt_sha256)).size <= 1);
   add("one agent CLI version", new Set(valid.map((r) => r.environment.agent_cli_version)).size <= 1, [...new Set(valid.map((r) => r.environment.agent_cli_version))].join(", "));
-  add("same model, effort, max turns, timeout for all runs", true, `${manifest.agent.model}, effort ${manifest.agent.effort}, ${manifest.agent.max_turns} turns, ${manifest.agent.timeout_seconds}s (enforced per run; mismatching runs are invalid)`);
-  add("fresh agent session per run", new Set(valid.map((r) => r.environment.agent_session_id)).size === valid.length);
-  add("agent had only database tools (no filesystem/shell)", valid.every((r) => (r.environment.agent_tools ?? []).every((t) => t.startsWith("mcp__database__"))));
+  if (codex) {
+    add("same model, reasoning effort, timeout for all runs", valid.every((r) => r.environment.agent_model === manifest.agent.model && r.environment.agent_effort === manifest.agent.effort), `${manifest.agent.model}, effort ${manifest.agent.effort}, ${manifest.agent.timeout_seconds}s (requested per run; Codex does not echo the served model)`);
+    add("fresh agent session per run", new Set(valid.map((r) => r.environment.agent_session_id)).size === valid.length, manifest.agent.session_isolation);
+    add("agent used only database tools (no shell/file/web items)", valid.every((r) => (r.environment.agent_item_types ?? []).every((t) => ["agent_message", "reasoning", "mcp_tool_call", "todo_list", "error"].includes(t))),
+      `${valid.filter((r) => r.validity.warnings.some((w) => w.startsWith("agent used built-in"))).length} run(s) used built-in non-database tools (warning)`);
+  } else {
+    add("same model, effort, max turns, timeout for all runs", true, `${manifest.agent.model}, effort ${manifest.agent.effort}, ${manifest.agent.max_turns} turns, ${manifest.agent.timeout_seconds}s (enforced per run; mismatching runs are invalid)`);
+    add("fresh agent session per run", new Set(valid.map((r) => r.environment.agent_session_id)).size === valid.length);
+    add("agent had only database tools (no filesystem/shell)", valid.every((r) => (r.environment.agent_tools ?? []).every((t) => t.startsWith("mcp__database__"))));
+  }
   add("no rows written during any run", valid.every((r) => r.environment.rows_written === 0));
   add("MCP calls seen by agent equal calls seen by the recorder", true, "enforced per run; mismatching runs are invalid");
   add("SQL recorded for every run with tool calls", valid.every((r) => r.metrics.mcp_tool_calls === 0 || r.metrics.sql_statements > 0));
@@ -121,7 +132,10 @@ function markdown(s) {
   const head = (cells) => (row(cells), row(cells.map(() => "---")));
   const fmt = (x) => (x === null || x === undefined ? "-" : String(x));
   L.push(`# AdventureWorks MCP investigation benchmark: ${s.experiment_id}`, "");
-  L.push(`Model ${s.provenance.agent.model} (effort ${s.provenance.agent.effort}), Claude Code ${s.provenance.agent.cli_version}. QueryIO ${s.provenance.queryio.commit.slice(0, 12)}${s.provenance.queryio.dirty ? " (dirty tree)" : ""}, DBHub ${s.provenance.servers.dbhub}, @microsoft/postgres-mcp ${s.provenance.servers.postgres_mcp}. ${s.provenance.postgres.version.split(" on ")[0]}. Task suite ${s.provenance.task_suite.hash.slice(0, 12)}, ${s.provenance.repetitions} repetition(s), seed ${s.provenance.seed}.`, "");
+  if (codex) L.push(`Agent: Codex CLI ${s.provenance.agent.cli_version} / Model: ${s.provenance.agent.model} (${s.provenance.agent.effort}) / Auth: ${s.provenance.agent.auth_method}. Grader: Codex CLI / ${s.provenance.grader.model} (${s.provenance.grader.effort}).`, "");
+  else L.push(`Agent: Claude Code ${s.provenance.agent.cli_version} / Model: ${s.provenance.agent.model} (effort ${s.provenance.agent.effort}).`, "");
+  if (s.provenance.status) L.push(`**Status: ${s.provenance.status}.** ${s.provenance.status_note ?? ""}`, "");
+  L.push(`QueryIO ${s.provenance.queryio.commit.slice(0, 12)}${s.provenance.queryio.dirty ? " (dirty tree)" : ""}, DBHub ${s.provenance.servers.dbhub}, @microsoft/postgres-mcp ${s.provenance.servers.postgres_mcp}. ${s.provenance.postgres.version.split(" on ")[0]}. Task suite ${s.provenance.task_suite.hash.slice(0, 12)}, ${s.provenance.repetitions} repetition(s), seed ${s.provenance.seed}.`, "");
   L.push(`Runs: ${s.counts.valid} valid of ${s.counts.planned} planned, ${s.counts.graded} graded, ${s.counts.invalid_attempts} invalid attempt(s) excluded, ${s.counts.missing} missing.`, "");
   L.push("## Correctness (primary)", "");
   head(["", ...arms]);

@@ -42,6 +42,8 @@
     "benchmark:mcp:smoke": "node benchmark/mcp-v2/harness/pipeline.mjs --profile smoke",
     "benchmark:mcp:run": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
     "benchmark:mcp": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
+    "benchmark:mcp:codex:smoke": "node benchmark/mcp-v2/harness/pipeline.mjs --profile codex-smoke",
+    "benchmark:mcp:codex": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
     "benchmark:mcp:grade": "node benchmark/mcp-v2/harness/grader.mjs",
     "benchmark:mcp:report": "node benchmark/mcp-v2/harness/report.mjs"
   },

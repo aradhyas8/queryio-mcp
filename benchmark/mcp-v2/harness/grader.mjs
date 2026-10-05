@@ -7,14 +7,18 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import os from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { claudeArgs, runClaude } from "./agent.mjs";
+import { codexArgs, runCodex } from "./agent.mjs";
 import { BENCH_DIR, readJson, sha256 } from "./lib.mjs";
 import { loadPrivateManifest, loadPublicTasks } from "./tasks.mjs";
 
 const { values: opts, positionals } = parseArgs({ allowPositionals: true, options: { concurrency: { type: "string", default: "4" }, regrade: { type: "boolean", default: false } } });
 if (!positionals[0]) throw new Error("usage: grader.mjs <results dir>");
 const expDir = resolve(positionals[0]);
-const config = readJson(join(BENCH_DIR, "configs", "experiment.json")).grader;
+const manifest = readJson(join(expDir, "manifest.json"));
+// Grades from different grader models must never mix: older (Claude Code) experiments keep their grades.
+if (manifest.agent.executor !== "codex") throw new Error("not a Codex experiment; its grades come from the Claude Code grader");
+// The grader model pinned in the manifest at experiment start wins over the current config.
+const config = { ...readJson(join(BENCH_DIR, "configs", "experiment.json")).grader, ...manifest.grader };
 const template = readFileSync(join(BENCH_DIR, "prompts", "grader.txt"), "utf8");
 const questions = Object.fromEntries(loadPublicTasks().map((t) => [t.id, t.question]));
 const truth = loadPrivateManifest();
@@ -35,12 +39,15 @@ const SCHEMA = {
   properties: {
     root_cause_correct: { type: "boolean" },
     verdict: { type: "string", enum: ["correct", "partial", "wrong"] },
-    required_facts: { type: "array", items: { type: "object", properties: { fact: { type: "string" }, found: { type: "boolean" } }, required: ["fact", "found"] } },
+    required_facts: { type: "array", items: { type: "object", properties: { fact: { type: "string" }, found: { type: "boolean" } }, required: ["fact", "found"], additionalProperties: false } },
     unsupported_or_incorrect_claims: { type: "array", items: { type: "string" } },
     rationale: { type: "string" },
   },
   required: ["root_cause_correct", "verdict", "required_facts", "unsupported_or_incorrect_claims", "rationale"],
+  additionalProperties: false,
 };
+const schemaPath = join(mkdtempSync(join(os.tmpdir(), "qio-grader-schema-")), "schema.json");
+writeFileSync(schemaPath, JSON.stringify(SCHEMA));
 
 mkdirSync(join(expDir, "grades"), { recursive: true });
 // Only answers from valid runs are graded (latest attempt per run key); nothing else from runs.jsonl
@@ -91,19 +98,27 @@ async function gradeOne(answerId, taskId, answer) {
     .replace("{{NOT_ROOT_CAUSE}}", () => t.not_root_cause.map((f) => `- ${f}`).join("\n"))
     .replace("{{ANSWER}}", () => text);
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const res = await runClaude({
-      cli: config.cli,
-      args: claudeArgs({ model: config.model, effort: config.effort, maxTurns: 3, systemPrompt: "You are a strict, impartial grader. Output only the requested structured result.", jsonSchema: SCHEMA }),
+    // Fresh Codex session with no MCP server and every tool feature disabled; the answer is in the prompt.
+    const cwd = mkdtempSync(join(os.tmpdir(), "qio-grader-"));
+    const lastMessagePath = join(cwd, "last-message.json");
+    const res = await runCodex({
+      args: codexArgs({ model: config.model, effort: config.effort, developerInstructions: "You are a strict, impartial grader. Output only the requested structured result.", outputSchemaPath: schemaPath, lastMessagePath }),
       prompt,
-      cwd: mkdtempSync(join(os.tmpdir(), "qio-grader-")),
+      cwd,
       timeoutMs: config.timeout_seconds * 1000,
+      lastMessagePath,
     });
-    if (res.result?.api_error_status === 429) return "rate-limited";
-    const out = res.result?.structured_output;
-    if (out && SCHEMA.required.every((k) => k in out)) {
-      return { ...base, grader: `llm:${config.model}`, grader_effort: config.effort, prompt_sha256: sha256(prompt), ...out, raw_result: res.result };
+    if (res.error?.kind === "rate_limit" || res.error?.kind === "usage_limit") return "rate-limited";
+    let out = null;
+    try {
+      out = JSON.parse(res.answer);
+    } catch {
+      /* retried below */
     }
-    console.error(`[grade] ${answerId}: attempt ${attempt} returned no structured output (${res.result?.subtype ?? res.exitCode})`);
+    if (out && SCHEMA.required.every((k) => k in out)) {
+      return { ...base, grader: `llm:codex:${config.model}`, grader_effort: config.effort, grader_session_id: res.sessionId, prompt_sha256: sha256(prompt), ...out, usage: res.usage };
+    }
+    console.error(`[grade] ${answerId}: attempt ${attempt} returned no structured output (exit ${res.exitCode}${res.error ? `, ${res.error.message.slice(0, 200)}` : ""})`);
   }
   return { ...base, grader: "failed", verdict: null, root_cause_correct: null, required_facts: [], unsupported_or_incorrect_claims: [], rationale: "grader failed" };
 }

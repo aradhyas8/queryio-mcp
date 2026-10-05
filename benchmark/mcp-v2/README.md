@@ -21,8 +21,9 @@ secondary, and efficiency is reported both over all runs and over correct runs o
 npm run benchmark:mcp:setup     # fetch/verify inputs, install pinned servers, build QueryIO, load + verify AdventureWorks
 npm run benchmark:mcp:validate  # validate every incident from a clean snapshot (writes incidents/validation/report.json)
 npm run benchmark:mcp:probe     # no-LLM check: each server via the recorder, SQL capture, write blocked
+npm run benchmark:mcp:codex:smoke  # setup + 3 tasks (easy/medium/hard) x 3 arms x 1 rep + grading + report
+npm run benchmark:mcp:codex        # setup + all tasks x 3 arms x 5 reps + grading + report
 npm run benchmark:mcp:smoke     # setup + 5 tasks x 3 arms x 2 reps + grading + report
-npm run benchmark:mcp:run       # setup + all tasks x 3 arms x 5 reps + grading + report
 npm run benchmark:mcp:report -- benchmark/mcp-v2/results/<experiment>   # recompute reports from raw data
 npm run benchmark:mcp:grade  -- benchmark/mcp-v2/results/<experiment>   # (re)grade answers
 ```
@@ -30,12 +31,14 @@ npm run benchmark:mcp:grade  -- benchmark/mcp-v2/results/<experiment>   # (re)gr
 Runner options (pass after `--`): `--tasks a,b`, `--arms a,b`, `--reps n`, `--concurrency n`,
 `--resume <results dir>` (fills in missing or invalid runs of an existing experiment).
 
-Requirements: Docker, Node 22+, and the `claude` CLI logged in (agent and grader). Host port 54330.
+Requirements: Docker, Node 22+, and the Codex CLI (`npm i -g @openai/codex`) logged in with ChatGPT
+(`codex login`; agent and grader). Host port 54330. The harness copies `~/.codex/auth.json` into the
+gitignored `benchmark/mcp-v2/.codex-home/` and copies refreshed tokens back, so the main login stays valid.
 
 ## Architecture
 
 ```
-claude -p (fresh session, no built-in tools)          one run
+codex exec (fresh session + fresh CODEX_HOME)         one run
    |  stdio
    v
 harness/mcp-recorder.mjs   <- same proxy for every arm: logs every JSON-RPC message + one record per tools/call
@@ -66,22 +69,39 @@ PostgreSQL 16 (Docker)    awr_<random>: clone of the task template   <- log_stat
   excluded. Reported as all statements, statements excluding transaction control / `SET` / empty
   pings, and SQL errors. Rows returned come from `pg_stat_statements`. A simple-protocol message with
   several statements counts once.
-* **Agent.** Claude Code headless (`claude -p`) with: one model and effort for all arms
-  (`configs/experiment.json`), `--tools ""` (no shell, filesystem, or web), `--strict-mcp-config`
-  with the arm's server named `database`, `--setting-sources ""` and `--disable-slash-commands` (no
-  user hooks, plugins, skills, or settings), a replaced system prompt (`prompts/system.txt`), the
-  neutral task prompt (`prompts/task.txt`), `--max-turns`, a wall-clock timeout, an empty temporary
-  working directory, and no session persistence. The answer key cannot be read by the agent: it has no
-  file tools, and its working directory is empty.
+* **Agent.** Codex CLI headless (`codex exec`, `harness/agent.mjs`), model `gpt-6-luna` with
+  `model_reasoning_effort=max` for every run of every arm (`configs/experiment.json`, pinned in the
+  manifest). Each session gets a throwaway `CODEX_HOME` holding only a copy of `auth.json` (no user
+  config, `AGENTS.md`, memories, rules, or history; deleted afterwards), plus `--ignore-user-config`,
+  `--ignore-rules`, `--ephemeral`, an empty temporary working directory, `-s read-only`,
+  `approval_policy="never"`, `web_search="disabled"`, and the shell, file, browser, image, plugin,
+  hook, skill, goal, memory, and sub-agent features disabled. The only MCP server is the arm's, named
+  `database`, with `default_tools_approval_mode="approve"` (otherwise every call is refused under
+  `approval_policy=never`). The system prompt goes in as `developer_instructions` (Codex keeps its own
+  base instructions), the neutral task prompt over stdin, and a wall-clock timeout applies (there is no
+  turn limit). Code mode stays on because MCP tools are reachable only through it in Codex 0.160; its
+  `exec` cannot read files or the network. The answer key cannot be read by the agent.
+* **Codex built-ins that cannot be removed.** `wait`, `request_user_input`, and the collaboration
+  (sub-agent) tools remain. Sub-agents inherit the same restrictions. Their use is recorded as a
+  warning on the run; any shell, file-change, or web item in the event stream makes the run invalid.
+* **Executor history.** Experiments `20261005T145212-smoke` and `20261005T150745-full` were run with
+  Claude Code (Claude Sonnet 5.5 agent, Claude Opus 5.5 grader). The full one is marked
+  `status: partial` and was not resumed. They are kept as-is and must never be combined with Codex
+  results; the runner refuses to resume them and the grader refuses to grade them.
 * **Grading.** `harness/grader.mjs` gives a grader model (configured separately) only the question,
   the private ground truth, and one answer identified by a random id, with tool and product names
   replaced by `[tool]`. It returns a root-cause verdict (correct / partial / wrong), which required
-  facts were found, and unsupported claims. The prompt and raw output are saved. Empty answers are
-  graded wrong by rule.
+  facts were found, and unsupported claims. The grader is a fresh Codex session (same isolation, no
+  MCP server, `--output-schema` for the JSON shape), model and effort pinned in the manifest
+  (`gpt-6-luna`, `high`). **Methodology change:** the Claude Code experiments were graded by Claude
+  Opus 5.5; Codex experiments are graded by `gpt-6-luna`, so grades are not comparable across them.
+  Empty answers are graded wrong by rule.
 * **Validity.** A run is invalid (kept in `runs.jsonl`, excluded from the report, listed in it) if the
-  database state differs, rows were written, the agent saw non-database tools, the MCP server did not
-  connect, a different model was used, the agent hit an API error, the recorder missed calls the
-  agent made, or the prompt differs. Timeouts and turn limits are valid outcomes (graded as given).
+  database state differs, rows were written, the agent produced shell/file/web items, called an MCP
+  server other than `database`, the MCP server did not connect, the agent exited with an error, the
+  recorder missed calls the agent made, or the prompt differs. Timeouts are valid outcomes (graded as
+  given). Rate limits (429) are retried with backoff and never recorded; a usage limit stops the
+  invocation cleanly (`--resume` continues).
 
 ## Files
 
@@ -173,8 +193,9 @@ records.
 * The agent CLI injects some environment context (platform, working directory) into every session;
   it is identical across arms.
 * Tokens are reported for reference only.
-* One model (Claude Sonnet) is used for the agent and a different one (Claude Opus) for grading; the
-  grader is from the same model family. Manual audit of a sample of grades is recommended before any
-  public claim.
+* The agent and the grader are the same model (`gpt-6-luna`, different effort). Manual audit of a
+  sample of grades is recommended before any public claim.
+* Codex does not echo the served model in `--json` events, so the model is the one requested (pinned
+  per run), not one observed. Agent turn counts are not exposed either (reported as `-`).
 * Disk: each group needs one template and one clone per arm (~110 MB each). The Docker disk must have
   room; a near-full host disk stalled Docker during development.
