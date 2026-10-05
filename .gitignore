@@ -12,3 +12,7 @@ SPEC.md
 .claude/
 .hermes/
 skills-lock.json
+
+# MCP v2 benchmark: downloaded inputs
+benchmark/mcp-v2/.cache/
+benchmark/mcp-v2/results/

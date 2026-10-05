@@ -1,0 +1,44 @@
+{
+  "agent": {
+    "cli": "claude",
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "max_turns": 60,
+    "timeout_seconds": 900
+  },
+  "grader": {
+    "cli": "claude",
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "timeout_seconds": 600
+  },
+  "arms": [
+    "queryio",
+    "dbhub",
+    "postgres-mcp"
+  ],
+  "profiles": {
+    "smoke": {
+      "tasks": [
+        "sales-e01",
+        "purch-e02",
+        "sales-m02",
+        "inv-m04",
+        "inv-h02"
+      ],
+      "repetitions": 2
+    },
+    "full": {
+      "tasks": "all",
+      "repetitions": 5
+    },
+    "trial": {
+      "tasks": [
+        "sales-e01"
+      ],
+      "repetitions": 1
+    }
+  },
+  "seed": 20261005,
+  "concurrency": 3
+}

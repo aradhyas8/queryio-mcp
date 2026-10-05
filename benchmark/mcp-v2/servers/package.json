@@ -1,0 +1,9 @@
+{
+  "name": "queryio-benchmark-mcp-servers",
+  "private": true,
+  "description": "Pinned third-party MCP servers for the MCP v2 benchmark. Exact versions only; the lockfile is committed.",
+  "dependencies": {
+    "@bytebase/dbhub": "1.4.0",
+    "@microsoft/postgres-mcp": "0.2.0"
+  }
+}
