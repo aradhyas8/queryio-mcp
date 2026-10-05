@@ -69,14 +69,14 @@ function formatCheckReport(result: CheckResult): string {
   ];
 
   if (result.warnings.length === 0) {
-    lines.push("  none (role is least-privileged)");
+    lines.push("  none detected");
   } else {
     for (const warning of result.warnings) {
       lines.push(`  ⚠ ${warning}`);
     }
   }
 
-  lines.push("", "Dedicated least-privilege role SQL template:", "--------------------------------------------", result.role_template);
+  lines.push("", "Dedicated read-only role SQL template:", "---------------------------------------", result.role_template);
 
   return lines.join("\n");
 }

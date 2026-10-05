@@ -16,6 +16,7 @@ export const DANGEROUS_PREDEFINED_ROLES = [
   "pg_read_server_files",
   "pg_write_server_files",
   "pg_write_all_data",
+  "pg_signal_backend",
 ] as const;
 
 /** Generate a ready-to-edit SQL template for creating a dedicated read-only role. */
@@ -24,9 +25,13 @@ export function generateRoleTemplate(database: string): string {
   return [
     `-- Create dedicated read-only role for QueryIO:`,
     `CREATE ROLE queryio_role WITH LOGIN PASSWORD 'CHANGE_ME_PASSWORD';`,
+    `-- ALTER ROLE queryio_role SET default_transaction_read_only = on additionally hardens the role.`,
     `GRANT CONNECT ON DATABASE ${quotedDb} TO queryio_role;`,
+    `-- Covers the public schema only and must be repeated per schema:`,
     `GRANT USAGE ON SCHEMA public TO queryio_role;`,
     `GRANT SELECT ON ALL TABLES IN SCHEMA public TO queryio_role;`,
+    `-- ALTER DEFAULT PRIVILEGES applies only to tables later created by the role that runs it;`,
+    `-- tables created by another owner (e.g. a migration user) need ALTER DEFAULT PRIVILEGES FOR ROLE <owner> ...`,
     `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO queryio_role;`,
   ].join("\n");
 }

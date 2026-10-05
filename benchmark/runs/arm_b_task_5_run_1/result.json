@@ -2,15 +2,13 @@
   "arm": "B",
   "task": 5,
   "run": 1,
-  "interactions": 35,
-  "db_output_bytes": 74427,
-  "failed_operations": 0,
-  "duration_ms": 10049,
+  "interactions": 37,
+  "db_output_bytes": 64294,
+  "failed_operations": 2,
+  "wall_clock_seconds": 194,
   "grade": "correct",
+  "grading": "manual",
   "grading_notes": "Correct: identified suspended orgs by plan and {50, 150, 250} not delinquent under 14-day grace",
   "final_answer": "\"### Investigation Findings: Suspended Organizations and Delinquency Breakdown\\n\\n#### 1. Suspended Organizations Count (Broken Down by Plan)\\n\\nThere are **12** suspended organizations in total (out of 300 total organizations across the system):\\n\\n| Plan | Code | Price / mo | Total Orgs | Active | Suspended | Closed |\\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\\n| **Free** | `free` | $0 | 75 | 73 | **2** | 0 |\\n| **Starter** | `starter` | $19 | 75 | 73 | **2** | 0 |\\n| **Team** | `team` | $49 | 75 | 69 | **6** | 0 |\\n| **Enterprise** | `enterprise` | $199 | 75 | 73 | **2** | 0 |\\n| **Total** | | | **300** | **288** | **12** | **0** |\\n\\nThe 12 suspended organizations are:\\n- **Free (2)**: Workspace 148 (`id: 148`), Workspace 296 (`id: 296`)\\n- **Starter (2)**: Workspace 37 (`id: 37`), Workspace 185 (`id: 185`)\\n- **Team (6)**: Workspace 50 (`id: 50`), Workspace 74 (`id: 74`), Workspace 142 (`id: 142`), Workspace 150 (`id: 150`), Workspace 222 (`id: 222`), Workspace 250 (`id: 250`)\\n- **Enterprise (2)**: Workspace 111 (`id: 111`), Workspace 259 (`id: 259`)\\n\\n---\\n\\n#### 2. Suspended Organizations Not Actually Delinquent Under `billing.ts` Rules\\n\\nUnder the delinquency logic in `src/billing.ts`:\\n```ts\\nconst GRACE_DAYS = 14;\\n\\nexport async function isDelinquent(orgId: number): Promise<boolean> {\\n  const row = await db.maybeOne(sql`\\n    SELECT 1 FROM invoices\\n    WHERE org_id = ${orgId}\\n      AND status = 'open'\\n      AND due_at < now() - ${GRACE_DAYS} * interval '1 day'\\n    LIMIT 1`);\\n  return row !== null;\\n}\\n```\\nAn organization is delinquent if and only if it has an invoice with `status = 'open'` and `due_at < now() - interval '14 days'`.\\n\\nEvaluating this rule across all 12 suspended organizations reveals that **3 organizations are not delinquent**:\\n\\n1. **Workspace 50 (`id: 50`, Team Plan)**:\\n   - **Status under `isDelinquent()`**: `false`\\n   - **Reason**: All prior invoices are paid (invoice 10344 was paid on 2026-09-07). Its only open invoice (10343) is due on **2026-10-06**, which \n<truncated 1596 bytes>",
-  "conversation_id": "3db00358-9a6d-4d65-b1f0-a63bc0c127eb",
-  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/3db00358-9a6d-4d65-b1f0-a63bc0c127eb/.system_generated/logs/transcript.jsonl",
-  "completed_at": "2026-10-04T16:51:35.664Z",
-  "wall_clock_seconds": 194
+  "completed_at": "2026-10-04T16:51:35.664Z"
 }

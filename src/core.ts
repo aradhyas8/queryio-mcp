@@ -132,8 +132,25 @@ function assertReadOriented(sql: string): void {
   }
 }
 
+const TEXT_OIDS = [
+  pg.types.builtins.DATE, // 1082
+  pg.types.builtins.TIMESTAMP, // 1114
+  1182, // date[]
+  1115, // timestamp[]
+];
+
+function createTypeOverrides(): pg.TypeOverrides {
+  const types = new pg.TypeOverrides();
+  const textParser = (val: string) => val;
+  for (const oid of TEXT_OIDS) {
+    types.setTypeParser(oid, textParser);
+  }
+  return types;
+}
+
 export function createCore(settings: Settings): Core {
-  const pool = new pg.Pool({ connectionString: settings.databaseUrl, max: 2 });
+  const types = createTypeOverrides();
+  const pool = new pg.Pool({ connectionString: settings.databaseUrl, max: 2, types });
   // An idle client losing its connection must not crash the server; the pool replaces it.
   pool.on("error", () => {});
   const audit = createAuditLog(settings.auditLog);
@@ -173,7 +190,7 @@ export function createCore(settings: Settings): Core {
       return await work(client);
     } finally {
       try {
-        await client.query("ROLLBACK");
+        await client.query("ROLLBACK; SELECT pg_advisory_unlock_all()");
       } catch (err) {
         broken = err as Error;
       }
@@ -326,7 +343,7 @@ export function createCore(settings: Settings): Core {
       const columns = found.fields.map((f) => f.name);
       const text = new Map(columns.map((c, i) => [c, found.rows[0][i] as string | null]));
       const parsed = found.rows[0].map((v, i) =>
-        v === null ? null : pg.types.getTypeParser(found.fields[i].dataTypeID, "text")(v as string),
+        v === null ? null : (types as pg.CustomTypesConfig).getTypeParser(found.fields[i].dataTypeID, "text")(v as string),
       );
 
       let valuesTruncated = 0;

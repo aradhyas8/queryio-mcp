@@ -37,6 +37,13 @@ describe("core.check() with superuser connection", () => {
     });
     expect(result.redact_patterns).toContain("password");
     expect(result.audit_log).toBeNull(); // disabled by testSettings
+    expect(result.role_template).toContain("-- Create dedicated read-only role for QueryIO:");
+    expect(result.role_template).not.toContain("least-privilege");
+    expect(result.role_template).toContain("public");
+    expect(result.role_template).toMatch(/covers.*public.*schema only.*must be repeated per schema/i);
+    expect(result.role_template).toMatch(/ALTER DEFAULT PRIVILEGES applies only to tables later created by the role that runs it/i);
+    expect(result.role_template).toMatch(/ALTER DEFAULT PRIVILEGES FOR ROLE <owner>/i);
+    expect(result.role_template).toMatch(/ALTER ROLE .*SET default_transaction_read_only = on.*additionally hardens/i);
     expect(result.role_template).toContain("CREATE ROLE queryio_role WITH LOGIN PASSWORD");
     expect(result.role_template).toContain('GRANT CONNECT ON DATABASE "queryio_test" TO queryio_role;');
     expect(result.role_template).toContain("GRANT USAGE ON SCHEMA public TO queryio_role;");
@@ -139,6 +146,36 @@ describe("core.check() with non-superuser holding dangerous role or write privil
       );
     } finally {
       await core.close();
+    }
+  });
+
+  it("detects membership in pg_signal_backend and warns", async () => {
+    const signalRole = "queryio_test_signal_role";
+    const signalPassword = "signal_password_123";
+
+    await sql(`
+      ${dropRoleSql(signalRole)}
+      CREATE ROLE ${signalRole} WITH LOGIN PASSWORD '${signalPassword}';
+      GRANT CONNECT ON DATABASE ${TEST_DB} TO ${signalRole};
+      GRANT pg_signal_backend TO ${signalRole};
+    `);
+
+    const url = new URL(ADMIN_URL);
+    url.username = signalRole;
+    url.password = signalPassword;
+    url.pathname = `/${TEST_DB}`;
+
+    const core = createCore(testSettings({ QUERYIO_DATABASE_URL: url.toString() }));
+    try {
+      const result = await core.check();
+      expect(result.superuser).toBe(false);
+      expect(result.dangerous_roles).toContain("pg_signal_backend");
+      expect(result.warnings).toContain(
+        `connected role "${signalRole}" is highly privileged; QueryIO is a bounded interface, not the database security boundary`,
+      );
+    } finally {
+      await core.close();
+      await sql(dropRoleSql(signalRole));
     }
   });
 

@@ -23,12 +23,22 @@ describe("README specification coverage", () => {
     expect(readme).toContain("3. Add QueryIO to Your MCP Client");
     expect(readme).toContain("4. Ask the Agent a Debugging Question");
 
+    // Local testing instructions without version-specific tarball
+    expect(readme).not.toMatch(/queryio-\d+\.\d+\.\d+\.tgz/);
+
     // Client integration examples
     expect(readme).toContain("Claude Code");
     expect(readme).toContain("claude mcp add queryio");
+    expect(readme).toContain(".mcp.json");
+    expect(readme).toContain("~/.claude.json");
+    expect(readme).not.toContain(".claude/mcp.json");
+
     expect(readme).toContain("Codex (OpenAI Codex / Codex CLI)");
     expect(readme).toContain("codex mcp add queryio");
     expect(readme).toContain("[mcp_servers.queryio]");
+
+    // Step 4 softens to plausible behavior without promising describe_tables or a fixed tool sequence
+    expect(readme).not.toContain("inspect schema/statistics with `describe_tables`");
   });
 
   it("describes the four tools and their input/output contracts", () => {
@@ -52,7 +62,33 @@ describe("README specification coverage", () => {
     expect(readme).toContain('"deadline"');
   });
 
-  it("lists all configuration knobs, defaults, and explains CLI flags policy", () => {
+  it("documents the structured error contract and payload shape matching code", () => {
+    const expectedCategories = [
+      "`timeout`",
+      "`lock_timeout`",
+      "`read_only`",
+      "`syntax_error_or_access_rule_violation`",
+      "`integrity_constraint_violation`",
+      "`connection_exception`",
+      "`postgres_error`",
+      "`client_error`",
+      "`read_oriented`",
+      "`not_found`",
+      "`no_primary_key`",
+      "`key_mismatch`",
+      "`row_not_found`",
+    ];
+
+    for (const category of expectedCategories) {
+      expect(readme).toContain(category);
+    }
+
+    // Error payload shape
+    expect(readme).toMatch(/\{\s*error:\s*\{\s*category,\s*code,\s*message,\s*hint\s*\}/);
+    expect(readme).toMatch(/MCP error flag|isError/i);
+  });
+
+  it("lists all configuration knobs, defaults, byte-cap scope, and explains CLI flags policy", () => {
     const expectedKnobs = [
       "QUERYIO_DATABASE_URL",
       "QUERYIO_STATEMENT_TIMEOUT_MS",
@@ -75,19 +111,31 @@ describe("README specification coverage", () => {
 
     expect(readme).toContain("Configuration & Defaults");
     expect(readme).toContain("Command-line flags and parameters are deliberately rejected");
+
+    // QUERYIO_MAX_RESPONSE_BYTES scoped to query only
+    expect(readme).toMatch(/QUERYIO_MAX_RESPONSE_BYTES.*bounds `query` only|bounds `query` only/i);
   });
 
-  it("states honest security posture, superuser warning, and least-privilege role template", () => {
+  it("states honest security posture, superuser warning, dedicated role template, and security caveats", () => {
     expect(readme).toContain("Security Posture (Stated Honestly)");
     expect(readme).toContain("What QueryIO Enforces");
     expect(readme).toContain("What Is Best-Effort");
     expect(readme).toContain("What Is Not Guaranteed");
     expect(readme).toContain("Name-Based Redaction");
 
-    // Superuser warning & least-privilege template
+    // Superuser warning & dedicated read-only role template (aligned with #16)
     expect(readme).toContain("Connecting as a PostgreSQL superuser destroys the meaningful security boundary");
     expect(readme).toContain("CREATE ROLE queryio_role WITH LOGIN PASSWORD");
     expect(readme).toContain("GRANT SELECT ON ALL TABLES IN SCHEMA public TO queryio_role");
+    expect(readme).toMatch(/default_transaction_read_only = on/);
+    expect(readme).toMatch(/ALTER DEFAULT PRIVILEGES.*created by the role that runs it/i);
+
+    // Dangerous predefined roles list includes pg_signal_backend
+    expect(readme).toContain("pg_signal_backend");
+
+    // Security caveats: shared role backend termination & dblink/FDW escapes
+    expect(readme).toMatch(/role shared with the application.*terminate.*application('s)? backends/i);
+    expect(readme).toMatch(/dblink.*FDW.*escape.*read-only/i);
 
     // Safe default path vs sandbox
     expect(readme).toContain("QueryIO is the safe default path, not a sandbox");
@@ -104,10 +152,23 @@ describe("README specification coverage", () => {
     expect(readme).toContain("`has_more` replaces exact omitted counts");
   });
 
-  it("defers benchmark claims until issue 12 produces results", () => {
+  it("summarizes benchmark findings from BENCHMARK.md without duplicating tables", () => {
     expect(readme).toContain("Evaluation & Benchmarks");
-    expect(readme).not.toMatch(/\b30%\s+faster\b/i);
-    expect(readme).not.toMatch(/\bbenchmark claims\b/i);
+    expect(readme).toContain("BENCHMARK.md");
+
+    // No duplicated benchmark comparison tables
+    expect(readme).not.toMatch(/\|.*Forensic Tasks.*\|/);
+    expect(readme).not.toMatch(/\|.*Task Category.*\|/);
+    expect(readme).not.toMatch(/\|.*Arm A \(Raw `psql`\).*\|/);
+
+    // Summary of #19 results
+    expect(readme).toMatch(/25(-|\s+)run/i);
+    expect(readme).toMatch(/forensic/i);
+  });
+
+  it("contains no file:/// links and links to BENCHMARK.md relatively", () => {
+    expect(readme).not.toContain("file:///");
+    expect(readme).toMatch(/\[BENCHMARK\.md\]\((\.\/)?BENCHMARK\.md\)/);
   });
 });
 

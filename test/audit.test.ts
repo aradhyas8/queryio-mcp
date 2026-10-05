@@ -1,6 +1,6 @@
-﻿import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createCore } from "../src/core.js";
 import { loadSettings } from "../src/settings.js";
@@ -90,5 +90,18 @@ it("no truncated field appears anywhere in any query audit event", async () => {
   const { events } = await audited({ QUERYIO_MAX_ROWS: "2" }, "SELECT g FROM generate_series(1, 5) g");
   for (const ev of events) {
     expect(Object.keys(ev)).not.toContain("truncated");
+  }
+});
+
+it("creates the audit log directory with mode 0700 and file with mode 0600 on Unix", async () => {
+  const { path } = await audited({}, "SELECT 1");
+  expect(existsSync(path)).toBe(true);
+
+  if (process.platform !== "win32") {
+    const fileStat = statSync(path);
+    expect(fileStat.mode & 0o777).toBe(0o600);
+
+    const dirStat = statSync(dirname(path));
+    expect(dirStat.mode & 0o777).toBe(0o700);
   }
 });

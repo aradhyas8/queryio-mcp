@@ -2,15 +2,13 @@
   "arm": "B",
   "task": 2,
   "run": 1,
-  "interactions": 19,
-  "db_output_bytes": 32195,
-  "failed_operations": 0,
-  "duration_ms": 5767,
+  "interactions": 22,
+  "db_output_bytes": 30466,
+  "failed_operations": 3,
+  "wall_clock_seconds": 121,
   "grade": "correct",
+  "grading": "manual",
   "grading_notes": "Correct: identified duplicate invoice 90018 open and overdue past grace",
   "final_answer": "\"### Investigation Summary: Organization 142 Workspace Suspension\\n\\n#### Root Cause\\nOrganization 142's workspace remains suspended because a **duplicate unpaid invoice (Invoice #90018)** was generated for the exact same billing period (`2026-09-04`) as Invoice #90017. \\n\\nWhen Invoice #90017 was paid on `2026-09-29`, the reactivation handler (`onInvoicePaid` in `src/billing.ts`) evaluated whether the organization was still delinquent via `isDelinquent(142)`. Because duplicate invoice #90018 was still in `open` status with a due date of `2026-09-11` (> 14 days past due), `isDelinquent(142)` returned `true`. Consequently, the reactivation query was bypassed, leaving Organization 142 in `suspended` status and its subscription in `past_due` status.\\n\\n---\\n\\n### Detailed Findings & Database Evidence\\n\\n#### 1. Invoices for Organization 142\\nQuerying `invoices` for `org_id = 142` revealed the following relevant records:\\n- **Invoice #90017**:\\n  - `period_start`: `2026-09-04`\\n  - `issued_at`: `2026-09-04 16:13:46.811 UTC`\\n  - `due_at`: `2026-09-11 16:13:46.811 UTC`\\n  - `amount_cents`: `4900` ($49.00 Team plan)\\n  - `status`: `paid`\\n  - `paid_at`: `2026-09-29 16:13:46.811 UTC`\\n  - `external_ref`: `ch_3QxR8sLkd2Z0aB17`\\n- **Invoice #90018** (Duplicate):\\n  - `period_start`: `2026-09-04` (identical billing cycle)\\n  - `issued_at`: `2026-09-04 16:14:46.811 UTC` (issued exactly 60 seconds after #90017)\\n  - `due_at`: `2026-09-11 16:14:46.811 UTC`\\n  - `amount_cents`: `4900` ($49.00 Team plan)\\n  - `status`: `open`\\n  - `paid_at`: `null`\\n- **Invoice #10987**:\\n  - `period_start`: `2026-10-04`\\n  - `issued_at`: `2026-09-29 16:13:46.811 UTC`\\n  - `due_at`: `2026-10-06 16:13:46.811 UTC`\\n  - `status`: `open` (not overdue; within its payment period)\\n\\nAcross the entire database, Organization 142 is the only organization with duplicate invoices for the same period.\\n\\n#### 2. Code Execution Flow (`src/billing.ts`)\\n1. **Delinquency Criteria**:\\n   `GRACE_DAYS` is configured as 14 days. `isDelinquent(orgId)` returns `tru\n<truncated 2055 bytes>",
-  "conversation_id": "e1328e87-525d-4a71-ae18-8f3f3a5d44cc",
-  "transcript_path": "C:/Users/aradhya/.gemini/antigravity-cli/brain/e1328e87-525d-4a71-ae18-8f3f3a5d44cc/.system_generated/logs/transcript.jsonl",
-  "completed_at": "2026-10-04T16:16:00.739Z",
-  "wall_clock_seconds": 121
+  "completed_at": "2026-10-04T16:16:00.739Z"
 }
