@@ -22,6 +22,10 @@ afterAll(async () => {
   await core.close();
 });
 
+it("reports the manifest version 0.1.0 on initialize", () => {
+  expect(client.getServerVersion()).toEqual({ name: "queryio", version: "0.1.0" });
+});
+
 it("lists the query tool with its input schema", async () => {
   const { tools } = await client.listTools();
   const query = tools.find((t) => t.name === "query");

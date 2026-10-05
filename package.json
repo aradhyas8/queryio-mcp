@@ -1,7 +1,26 @@
 {
   "name": "queryio",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Bounded, read-oriented PostgreSQL investigation interface for coding agents (MCP stdio server).",
+  "author": "Aradhya Singh",
+  "license": "MIT",
+  "homepage": "https://github.com/aradhyas8/queryio-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aradhyas8/queryio-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aradhyas8/queryio-mcp/issues"
+  },
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "database",
+    "sql"
+  ],
   "type": "module",
   "bin": {
     "queryio": "dist/cli.js"
@@ -16,9 +35,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepack": "npm run build"
+    "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && npm run build"
   },
-  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
     "pg": "8.23.1",

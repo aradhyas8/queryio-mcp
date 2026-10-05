@@ -1,11 +1,15 @@
+import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { Core } from "./core.js";
 import { toQueryError } from "./errors.js";
 
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
+
 export function createServer(core: Core): McpServer {
-  const server = new McpServer({ name: "queryio", version: "0.0.1" });
+  const server = new McpServer({ name: "queryio", version: pkg.version });
 
   server.registerTool(
     "query",
