@@ -112,7 +112,7 @@ Every run recorded the following metrics:
 - **Bytes:** Total UTF-8 bytes returned by the database tool entering the agent's context.
 - **Failed:** Number of database commands that exited with a non-zero exit code.
 - **Time:** Total wall-clock execution time (seconds).
-- **Grade:** Correctness against ground truth (`correct` / `incorrect`), evaluated manually.
+- **Grade:** Correctness against ground truth (`correct` / `partial` / `wrong`), evaluated manually.
 
 | Task | Category | Arm | Run | Grade | DB Interactions | DB Context Bytes | Failed Ops | Wall Time (s) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
