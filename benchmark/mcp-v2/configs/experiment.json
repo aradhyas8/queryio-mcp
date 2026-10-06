@@ -1,8 +1,8 @@
 {
   "agent": {
     "executor": "codex",
-    "model": "gpt-6-luna",
-    "effort": "max",
+    "model": "gpt-5.6-terra",
+    "effort": "low",
     "timeout_seconds": 1800,
     "max_rate_limit_retries": 3
   },

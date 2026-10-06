@@ -69,9 +69,10 @@ PostgreSQL 16 (Docker)    awr_<random>: clone of the task template   <- log_stat
   excluded. Reported as all statements, statements excluding transaction control / `SET` / empty
   pings, and SQL errors. Rows returned come from `pg_stat_statements`. A simple-protocol message with
   several statements counts once.
-* **Agent.** Codex CLI headless (`codex exec`, `harness/agent.mjs`), model `gpt-6-luna` with
-  `model_reasoning_effort=max` for every run of every arm (`configs/experiment.json`, pinned in the
-  manifest). Each session gets a throwaway `CODEX_HOME` holding only a copy of `auth.json` (no user
+* **Agent.** Codex CLI headless (`codex exec`, `harness/agent.mjs`), model `gpt-5.6-terra` with
+  `model_reasoning_effort=low` for every run of every arm (`configs/experiment.json`, pinned in the
+  manifest). Experiment `20261005T235752-full` used `gpt-6-luna` / `max` and was stopped after 6 runs;
+  it is superseded and never combined with `gpt-5.6-terra` results. Each session gets a throwaway `CODEX_HOME` holding only a copy of `auth.json` (no user
   config, `AGENTS.md`, memories, rules, or history; deleted afterwards), plus `--ignore-user-config`,
   `--ignore-rules`, `--ephemeral`, an empty temporary working directory, `-s read-only`,
   `approval_policy="never"`, `web_search="disabled"`, and the shell, file, browser, image, plugin,
@@ -193,7 +194,7 @@ records.
 * The agent CLI injects some environment context (platform, working directory) into every session;
   it is identical across arms.
 * Tokens are reported for reference only.
-* The agent and the grader are the same model (`gpt-6-luna`, different effort). Manual audit of a
+* The agent (`gpt-5.6-terra`) and the grader (`gpt-6-luna`) are both OpenAI models. Manual audit of a
   sample of grades is recommended before any public claim.
 * Codex does not echo the served model in `--json` events, so the model is the one requested (pinned
   per run), not one observed. Agent turn counts are not exposed either (reported as `-`).
