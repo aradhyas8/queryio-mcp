@@ -48,5 +48,6 @@
     }
   },
   "seed": 20261005,
-  "concurrency": 3
+  "concurrency": 3,
+  "group_concurrency": 3
 }

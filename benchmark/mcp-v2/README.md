@@ -28,7 +28,8 @@ npm run benchmark:mcp:report -- benchmark/mcp-v2/results/<experiment>   # recomp
 npm run benchmark:mcp:grade  -- benchmark/mcp-v2/results/<experiment>   # (re)grade answers
 ```
 
-Runner options (pass after `--`): `--tasks a,b`, `--arms a,b`, `--reps n`, `--concurrency n`,
+Runner options (pass after `--`): `--tasks a,b`, `--arms a,b`, `--reps n`, `--concurrency n` (arms at once),
+`--groups n` (task groups at once; default `group_concurrency` 3),
 `--resume <results dir>` (fills in missing or invalid runs of an existing experiment).
 
 Requirements: Docker, Node 22+, and the Codex CLI (`npm i -g @openai/codex`) logged in with ChatGPT

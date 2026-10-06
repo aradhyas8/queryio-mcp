@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// npm run benchmark:mcp:run -- [--profile smoke|full] [--tasks a,b] [--arms a,b] [--reps n] [--concurrency n] [--resume <dir>]
+// npm run benchmark:mcp:run -- [--profile smoke|full] [--tasks a,b] [--arms a,b] [--reps n] [--concurrency n] [--groups n] [--resume <dir>]
 // Runs every (task, arm, repetition) as a fresh, isolated agent session against its own clone of the
 // task's incident database, recording MCP traffic (common recorder) and SQL (PostgreSQL log) for each.
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -23,6 +23,7 @@ const { values: opts } = parseArgs({
     arms: { type: "string" },
     reps: { type: "string" },
     concurrency: { type: "string" },
+    groups: { type: "string" },
     resume: { type: "string" },
   },
 });
@@ -55,10 +56,19 @@ const done = new Set(
 );
 const tail = new LogTail();
 await tail.init();
-let cloneLock = Promise.resolve();
+// CREATE DATABASE ... TEMPLATE fails while another session uses the source, so every template build
+// and clone goes through one queue.
+let dbLock = Promise.resolve();
+const serialized = (fn) => {
+  const p = dbLock.then(fn);
+  dbLock = p.catch(() => {});
+  return p;
+};
 // Arms of one (task, repetition) group run side by side on clones of one template, so they share the
-// same data, the same planner statistics, and the same time window. Groups run one after another.
+// same data, the same planner statistics, and the same time window. Up to group_concurrency groups run
+// at once (each with its own template); every arm of every group sees the same concurrent load.
 const parallelArms = Number(opts.concurrency ?? manifest.concurrency ?? 1);
+const parallelGroups = Number(opts.groups ?? manifest.group_concurrency ?? 1);
 const groups = [];
 for (const item of manifest.plan) {
   if (done.has(item.run_key)) continue;
@@ -69,12 +79,15 @@ for (const item of manifest.plan) {
 const total = groups.reduce((n, g) => n + g.items.length, 0);
 let finished = 0;
 let rateLimited = null;
-const templates = {};
-for (const group of groups) {
-  if (rateLimited) break;
+let nextGroup = 0;
+await Promise.all(Array.from({ length: Math.min(parallelGroups, groups.length) }, async () => {
+  while (nextGroup < groups.length && !rateLimited) await runGroup(groups[nextGroup++]);
+}));
+
+async function runGroup(group) {
   // One template per group (keeps disk use to one template plus one clone per arm). Its content must
   // match the digest recorded the first time this task was built in this experiment.
-  const name = await buildTemplate(group.task_id);
+  const name = await serialized(() => buildTemplate(group.task_id));
   const fp = await fingerprint(name);
   manifest.templates[group.task_id] ??= fp.digest;
   writeFileSync(join(expDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
@@ -82,7 +95,7 @@ for (const group of groups) {
     await dropDatabase(name);
     throw new Error(`${group.task_id}: template content differs from the digest recorded for this experiment`);
   }
-  templates[group.task_id] = { name, digest: fp.digest };
+  const template = { name, digest: fp.digest };
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(parallelArms, group.items.length) }, async () => {
     while (next < group.items.length && !rateLimited) {
@@ -92,7 +105,7 @@ for (const group of groups) {
       // Rate limits and network failures are retried with backoff; a usage limit (or one that persists)
       // ends the invocation.
       for (let retry = 0; ; retry++) {
-        record = await executeRun(item);
+        record = await executeRun(item, template);
         const kind = record.outcome.error_kind;
         if (!["rate_limit", "usage_limit", "network"].includes(kind)) break;
         if (kind === "usage_limit" || retry >= manifest.agent.max_rate_limit_retries) {
@@ -164,30 +177,20 @@ async function newManifest() {
     repetitions: reps,
     seed: config.seed,
     concurrency: Number(opts.concurrency ?? config.concurrency ?? 1),
+    group_concurrency: Number(opts.groups ?? config.group_concurrency ?? 1),
     plan,
     templates: {},
   };
 }
 
-async function executeRun(item) {
+async function executeRun(item, template) {
   const attempt = existsSync(join(expDir, "runs")) ? readdirSync(join(expDir, "runs")).filter((d) => d.startsWith(`${item.run_key}.a`)).length + 1 : 1;
   const runDir = join(expDir, "runs", `${item.run_key}.a${attempt}`);
   mkdirSync(runDir, { recursive: true });
   const problems = [];
   const warnings = [];
-  const template = templates[item.task_id];
 
-  let release;
-  const lock = new Promise((r) => (release = r));
-  const prev = cloneLock;
-  cloneLock = lock;
-  await prev;
-  let sb;
-  try {
-    sb = await createSandbox(template.name);
-  } finally {
-    release();
-  }
+  const sb = await serialized(() => createSandbox(template.name));
   const fp = await fingerprint(sb.database);
   if (fp.digest !== template.digest) problems.push("database state differs from the task template");
 
