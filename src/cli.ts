@@ -3,11 +3,19 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createCore, type CheckResult } from "./core.js";
 import { createServer } from "./mcp.js";
 import { loadSettings, type Settings } from "./settings.js";
+import type { ClientId } from "./setup.js";
 
+const setupFlags: Record<string, ClientId> = { "--claude": "claude", "--codex": "codex", "--cursor": "cursor" };
+const setupArgs = process.argv.slice(3);
 const isCheck = process.argv.length === 3 && process.argv[2] === "check";
-const isSetup = process.argv.length === 3 && process.argv[2] === "setup";
+const isSetup = process.argv[2] === "setup" && setupArgs.every((arg) => Object.hasOwn(setupFlags, arg));
 if (process.argv.length > 2 && !isCheck && !isSetup) {
-  console.error("Usage: queryio [check|setup]   (set QUERYIO_DATABASE_URL; other command-line arguments are not accepted)");
+  // Name an unknown flag only when it looks like a flag: other arguments may be connection strings.
+  const unknown = process.argv[2] === "setup" ? setupArgs.find((arg) => !Object.hasOwn(setupFlags, arg)) : undefined;
+  if (unknown !== undefined) {
+    console.error(/^--[a-z][a-z0-9-]{0,30}$/.test(unknown) ? `queryio: unsupported setup option ${unknown}` : "queryio: setup accepts only --claude, --codex, and --cursor");
+  }
+  console.error("Usage: queryio [check|setup]\n       queryio setup [--claude] [--codex] [--cursor]\nSet QUERYIO_DATABASE_URL; other command-line arguments are not accepted.");
   process.exit(2);
 }
 
@@ -26,6 +34,7 @@ if (isSetup) {
     env: { ...process.env },
     io: { lines: rl[Symbol.asyncIterator](), write: (text) => process.stdout.write(text) },
     serverEntry: fileURLToPath(import.meta.url),
+    preselectedClients: setupArgs.map((arg) => setupFlags[arg]),
   });
   rl.close();
   await new Promise((resolve) => process.stdout.write("", resolve)); // flush piped output before exiting

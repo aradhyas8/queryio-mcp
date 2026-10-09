@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { detectClients, redactEntry, runSetup, targetFor, type Context } from "../src/setup.js";
-import { ADMIN_URL, TEST_DB, sql } from "./db.js";
+import { detectClients, redactEntry, runSetup, targetFor, type Context, type SetupOptions } from "../src/setup.js";
+import { ADMIN_URL, TEST_DB, TEST_URL, sql } from "./db.js";
 
 let root: string;
 let ctx: Context;
@@ -20,7 +20,7 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }));
 
-async function setup(answers: string[], overrides: Partial<Context> & { serverEntry?: string } = {}) {
+async function setup(answers: string[], overrides: Partial<SetupOptions> = {}) {
   let output = "";
   const code = await runSetup({
     ...ctx,
@@ -40,6 +40,30 @@ const { command, args } = process.platform === "win32"
   : { command: "npx", args: ["-y", "queryio"] };
 
 describe("client selection", () => {
+  it.each([
+    { client: "claude", number: 1 },
+    { client: "codex", number: 2 },
+    { client: "cursor", number: 3 },
+  ] as const)("preselects $client instead of other detected clients without skipping verification", async ({ client, number }) => {
+    for (const directory of [".claude", ".codex", ".cursor"]) mkdirSync(home(directory));
+    const { code, output } = await setup(["", "", "y"], { preselectedClients: [client] });
+    expect(output).toContain(`Select clients (comma-separated numbers) [${number}]`);
+    expect(output).toContain("Choose scope [1]");
+    expect(output).toContain("Proposed changes:");
+    expect(output).toContain("Write 1 file?");
+    expect(output).toContain("QUERYIO_DATABASE_URL is not set in this terminal");
+    expect(code).toBe(1);
+    expect([".mcp.json", ".codex/config.toml", ".cursor/mcp.json"].map((file) => existsSync(proj(file))))
+      .toEqual([number === 1, number === 2, number === 3]);
+  });
+
+  it("lets users change the preselection to multiple clients", async () => {
+    const { output } = await setup(["1,2,3", "", "y"], { preselectedClients: ["codex"] });
+    expect(output).toContain("Select clients (comma-separated numbers) [2]");
+    expect(output).toContain("Write 3 files?");
+    for (const file of [".mcp.json", ".codex/config.toml", ".cursor/mcp.json"]) expect(existsSync(proj(file))).toBe(true);
+  });
+
   it("defaults to detected clients and explains undetected ones", async () => {
     mkdirSync(home(".cursor"));
     expect(detectClients(ctx)).toMatchObject({ claude: null, codex: null, cursor: home(".cursor") });
@@ -193,6 +217,29 @@ describe("existing configuration", () => {
 });
 
 describe("cancellation", () => {
+  it("keeps global-scope warnings and write confirmation with a preselection", async () => {
+    const global = await setup(["", "2", "n"], { preselectedClients: ["claude"] });
+    expect(global.code).toBe(130);
+    expect(global.output).toContain("Global setup lets QueryIO reach your database from every project");
+    expect(readdirSync(home())).toEqual([]);
+    const project = await setup(["", "1", "n"], { preselectedClients: ["claude"] });
+    expect(project.code).toBe(130);
+    expect(project.output).toContain("Write 1 file?");
+    expect(readdirSync(proj())).toEqual([]);
+  });
+
+  it("keeps replacement approval separate from write confirmation with a preselection", async () => {
+    const original = '{"mcpServers":{"queryio":{"command":"old"}}}';
+    writeFileSync(proj(".mcp.json"), original);
+    const kept = await setup(["", "1", "n"], { preselectedClients: ["claude"] });
+    expect(kept.output).toContain("Replace the existing queryio entry");
+    expect(readFileSync(proj(".mcp.json"), "utf8")).toBe(original);
+    const declined = await setup(["", "1", "y", "n"], { preselectedClients: ["claude"] });
+    expect(declined.code).toBe(130);
+    expect(declined.output).toContain("Write 1 file?");
+    expect(readFileSync(proj(".mcp.json"), "utf8")).toBe(original);
+  });
+
   it("writes nothing when input ends or the write is declined", async () => {
     expect((await setup(["1,3"])).code).toBe(130);
     const declined = await setup(["1,3", "1", "n"]);
@@ -224,7 +271,8 @@ describe("credentials", () => {
     url.pathname = `/${TEST_DB}`;
     execSync("npm run build", { stdio: "ignore" });
     try {
-      const { code, output } = await setup(["1,2,3", "1", "y"], {
+      const { code, output } = await setup(["", "1", "y"], {
+        preselectedClients: ["claude", "codex", "cursor"],
         env: { ...process.env, PATH: "", QUERYIO_DATABASE_URL: url.toString(), QUERYIO_AUDIT_LOG: "off" },
         serverEntry: join(__dirname, "..", "dist", "cli.js"),
       });
@@ -243,8 +291,19 @@ describe("credentials", () => {
     }
   }, 60_000);
 
+  it("still reports privileged-role warnings with a preselection", async () => {
+    const { code, output } = await setup(["", "1", "y"], {
+      preselectedClients: ["cursor"],
+      env: { PATH: "", QUERYIO_DATABASE_URL: TEST_URL, QUERYIO_AUDIT_LOG: "off" },
+    });
+    expect(code).toBe(0);
+    expect(output).toContain("superuser: yes");
+    expect(output).toMatch(/warning: connected role ".+" is highly privileged/);
+  });
+
   it("reports a failed connection without leaking the password", async () => {
-    const { code, output } = await setup(["3", "1", "y"], {
+    const { code, output } = await setup(["", "1", "y"], {
+      preselectedClients: ["cursor"],
       env: { PATH: "", QUERYIO_DATABASE_URL: "postgres://nobody:leak-me-pw@127.0.0.1:1/none", QUERYIO_AUDIT_LOG: "off" },
     });
     expect(code).toBe(1);

@@ -108,7 +108,7 @@ QueryIO validation categories are `read_oriented`, `not_found`, `no_primary_key`
 
 ## Configuration and defaults
 
-QueryIO reads settings from environment variables at startup. Its only subcommands are `check` and `setup`; other command-line arguments, including connection strings, are rejected with exit code 2. This policy applies to the QueryIO process; MCP clients' own registration commands can still accept and persist credentials.
+QueryIO reads settings from environment variables at startup. Its only subcommands are `check` and `setup`. The `setup` subcommand accepts the optional boolean flags `--claude`, `--codex`, and `--cursor`; other command-line arguments, including connection strings, are rejected with exit code 2. This policy applies to the QueryIO process; MCP clients' own registration commands can still accept and persist credentials.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -130,9 +130,17 @@ Numeric settings accept positive integers. Name matching for redaction is exact 
 
 ## Setup wizard
 
-`npx -y queryio setup` configures QueryIO for Claude Code, Codex, and Cursor. It takes no arguments and asks its questions interactively.
+`npx -y queryio setup` configures QueryIO for Claude Code, Codex, and Cursor. It asks its questions interactively. Optional flags preselect clients at the existing selection prompt:
 
-1. **Clients.** It detects each client from its command on `PATH` or its configuration directory, and preselects the detected ones. You can choose clients that were not detected; the wizard writes their configuration and notes that the client must be installed.
+| Flag | Preselected client |
+| --- | --- |
+| `--claude` | Claude Code |
+| `--codex` | Codex |
+| `--cursor` | Cursor |
+
+For example, run `npx -y queryio setup --codex`, or combine `--claude --cursor` to preselect both. Repeated flags are deduplicated. Flags override detected defaults, but do not skip the selection prompt: you can change or expand the selection. With no flags, setup behaves as before. Unknown flags, flag values, and positional arguments are rejected with exit code 2 before setup starts. The flags do not bypass scope selection, database checks, privilege warnings, or replacement/write confirmations.
+
+1. **Clients.** It detects each client from its command on `PATH` or its configuration directory, and preselects the detected ones when no flags are given. You can choose clients that were not detected; the wizard writes their configuration and notes that the client must be installed.
 2. **Scope.** Project scope, the default, writes to the current directory. Global scope writes to your user configuration, making QueryIO available in every project the client opens, and requires a second confirmation.
 3. **Preview.** For each file, it shows whether it will be created, added to, or left unchanged, and prints the entry. An existing, different `queryio` entry is shown with stored connection strings and literal environment values hidden, and is replaced only if you confirm. Nothing is written until you confirm the full set of changes; declining, closing input, or pressing Ctrl+C cancels without changes.
 4. **Write.** Each modified file is first copied to `~/.queryio/backups/`, outside the project so backups cannot be committed with it. Backup files are readable only by you on macOS and Linux, because an old entry may contain a stored connection string; setup names any such backup so you can delete it. The file is then replaced atomically through a temporary file. Other servers and settings are preserved, as are JSON indentation and line endings; Codex TOML is edited in place, keeping comments. If a file cannot be parsed, or cannot be updated without changing other settings, it is left unchanged and the entry to add manually is printed.

@@ -134,6 +134,11 @@ describe("README specification coverage", () => {
       QUERYIO_REDACT_REMOVE: "Empty",
     });
     expect(reference).toContain("other command-line arguments, including connection strings, are rejected with exit code 2");
+    for (const flag of ["--claude", "--codex", "--cursor"]) {
+      expect(readme).toContain(`npx -y queryio setup ${flag}`);
+      expect(reference).toContain(`\`${flag}\``);
+    }
+    expect(reference).toContain("do not skip the selection prompt");
     expect(reference).toContain("bounds `query` only");
     for (const name of defaults.redactPatterns) expect(reference).toContain(`\`${name}\``);
     expect(reference).toContain("exact and case-insensitive, not a substring or content scan");

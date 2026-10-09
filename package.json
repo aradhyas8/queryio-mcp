@@ -1,6 +1,6 @@
 {
   "name": "queryio",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "PostgreSQL MCP server for AI coding agents. Inspect a row and its foreign-key relationships with inspect_row, then investigate with bounded, read-oriented SQL.",
   "author": "Aradhya Singh",
   "license": "MIT",

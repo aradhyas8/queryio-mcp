@@ -83,6 +83,16 @@ Run the setup wizard from your application repository's root:
 npx -y queryio setup
 ```
 
+Optionally preselect a coding agent:
+
+```bash
+npx -y queryio setup --claude
+npx -y queryio setup --codex
+npx -y queryio setup --cursor
+```
+
+The flags change only the default at the client-selection prompt; you can still choose one or more agents there. Combine flags, such as `--claude --cursor`, to preselect multiple agents. Without flags, detected clients remain the defaults. Unknown flags and positional arguments are rejected. Scope selection, database checks, role warnings, and replacement/write confirmations are unchanged.
+
 The wizard detects Claude Code, Codex, and Cursor, lets you choose one or more of them, and writes a project-level configuration by default. Global configuration is optional and requires an extra confirmation. Before writing, it shows each file and entry it will change. It preserves other MCP servers and settings, backs up files it modifies, and asks before replacing an existing `queryio` entry. Running it again leaves matching configuration unchanged.
 
 The wizard never asks for the connection string and never writes it to a file. Each configuration references `QUERYIO_DATABASE_URL`, which the client passes to QueryIO when it starts the server. If the variable is set, the wizard checks connectivity and reports role warnings. If it is missing, the wizard explains how to set it and does not report setup as complete.

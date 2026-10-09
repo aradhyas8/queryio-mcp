@@ -3,7 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { execSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { ADMIN_URL, TEST_DB, TEST_URL, sql } from "./db.js";
 
@@ -96,6 +96,76 @@ it("refuses unrecognized subcommands with exit code 2", () => {
   expect(run.status).toBe(2);
   expect(run.stderr).toContain("Usage: queryio [check|setup]");
 });
+
+it.each([
+  { flags: ["--claude"], defaults: "1" },
+  { flags: ["--codex"], defaults: "2" },
+  { flags: ["--cursor"], defaults: "3" },
+  { flags: ["--cursor", "--claude", "--claude"], defaults: "1,3" },
+])("preselects setup clients for $flags and still asks for selection", ({ flags, defaults }) => {
+  const run = spawnSync(process.execPath, ["dist/cli.js", "setup", ...flags], {
+    env: { ...process.env, HOME: dir, USERPROFILE: dir, CLAUDE_CONFIG_DIR: undefined, CODEX_HOME: undefined, PATH: "" },
+    input: "", encoding: "utf8", timeout: 10_000,
+  });
+  expect(run.status).toBe(130);
+  expect(run.stdout).toContain(`Select clients (comma-separated numbers) [${defaults}]`);
+  expect(run.stdout).toContain("Setup cancelled. No files were changed.");
+});
+
+it.each([
+  ["setup", "--unknown"],
+  ["setup", "--claude", "--unknown"],
+  ["setup", "--codex=true"],
+  ["setup", "--cursor", "unexpected"],
+  ["--claude"],
+  ["check", "--codex"],
+])("rejects unsupported CLI arguments: %j", (...args) => {
+  const run = spawnSync(process.execPath, ["dist/cli.js", ...args], { encoding: "utf8", timeout: 10_000 });
+  expect(run.status).toBe(2);
+  expect(run.stdout).toBe("");
+  expect(run.stderr).toContain("queryio setup [--claude] [--codex] [--cursor]");
+});
+
+it("names an unsupported setup flag but never echoes other arguments", () => {
+  const flag = spawnSync(process.execPath, ["dist/cli.js", "setup", "--claud"], { encoding: "utf8", timeout: 10_000 });
+  expect(flag.stderr).toContain("queryio: unsupported setup option --claud");
+  const dsn = spawnSync(process.execPath, ["dist/cli.js", "setup", "--claude", "--url=postgres://u:pw@h/db"], { encoding: "utf8", timeout: 10_000 });
+  expect(dsn.status).toBe(2);
+  expect(dsn.stderr).toContain("setup accepts only --claude, --codex, and --cursor");
+  expect(dsn.stderr).not.toContain("pw@");
+});
+
+it.each([
+  { flag: "--claude", file: ".mcp.json" },
+  { flag: "--codex", file: join(".codex", "config.toml") },
+  { flag: "--cursor", file: join(".cursor", "mcp.json") },
+])("runs `queryio setup $flag` from the packed tarball and writes only that client's project config", ({ flag, file }) => {
+  const project = mkdtempSync(join(dir, "flag-project-"));
+  const home = mkdtempSync(join(dir, "flag-home-"));
+  // PATH holds only Node and npx, so no real client CLI runs (Claude Code would initialize files in the temporary home).
+  const env: Record<string, string | undefined> = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toUpperCase() !== "PATH"));
+  Object.assign(env, {
+    PATH: dirname(process.execPath), HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: undefined, CODEX_HOME: undefined, QUERYIO_DATABASE_URL: undefined,
+  });
+  const run = spawnSync("npx", ["-y", "--package", tarball, "queryio", "setup", flag], {
+    cwd: project, env, input: "\n\ny\n", encoding: "utf8", shell: process.platform === "win32", timeout: 120_000,
+  });
+  expect(run.stdout).toContain("Preselected from command-line flags");
+  expect(run.stdout).toContain("Write 1 file?");
+  expect(run.status).toBe(1); // configured; connection variable missing
+  expect(readdirSync(project, { recursive: true }).filter((f) => !String(f).endsWith(".codex") && !String(f).endsWith(".cursor"))).toEqual([file]);
+  expect(readdirSync(home)).toEqual([]);
+}, 180_000);
+
+it("cancels a flagged setup from the packed tarball without writing", () => {
+  const project = mkdtempSync(join(dir, "flag-cancel-"));
+  const run = spawnSync("npx", ["-y", "--package", tarball, "queryio", "setup", "--codex"], {
+    cwd: project, env: { ...process.env, QUERYIO_DATABASE_URL: undefined }, input: "\n\nn\n", encoding: "utf8", shell: process.platform === "win32", timeout: 120_000,
+  });
+  expect(run.status).toBe(130);
+  expect(run.stdout).toContain("Setup cancelled. No files were changed.");
+  expect(readdirSync(project)).toEqual([]);
+}, 180_000);
 
 it("refuses arguments after setup, such as a DSN", () => {
   const run = spawnSync("node", ["dist/cli.js", "setup", "postgres://u:p@localhost/db"], { encoding: "utf8" });

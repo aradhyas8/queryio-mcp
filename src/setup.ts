@@ -34,6 +34,7 @@ export interface SetupIO {
 
 export interface SetupOptions extends Context {
   readonly io: SetupIO;
+  readonly preselectedClients?: readonly ClientId[];
   /** Path of this package's cli.js; when set and the connection is available, setup starts it to confirm the server runs. */
   readonly serverEntry?: string;
 }
@@ -373,8 +374,10 @@ export async function runSetup(o: SetupOptions): Promise<number> {
     // 1. Clients
     const detected = detectClients(o);
     ORDER.forEach((c, i) => say(`  ${i + 1}) ${CLIENTS[c].name.padEnd(12)} ${detected[c] ? `detected (${detected[c]})` : "not detected"}`));
-    const defaults = ORDER.filter((c) => detected[c]);
-    if (defaults.length === 0) {
+    const defaults = ORDER.filter((c) => o.preselectedClients?.length ? o.preselectedClients.includes(c) : detected[c]);
+    if (o.preselectedClients?.length) {
+      say("", `Preselected from command-line flags: ${defaults.map((c) => CLIENTS[c].name).join(", ")}. Press Enter to keep, or enter other numbers.`);
+    } else if (ORDER.every((c) => !detected[c])) {
       say("", "No supported client was detected. You can still select one; install it or check that it is on PATH before using QueryIO.");
     }
     let clients: ClientId[] = [];
