@@ -41,6 +41,15 @@ export function loadSettings(env: Record<string, string | undefined>): Settings 
       "QUERYIO_DATABASE_URL is not set. Set it to a PostgreSQL connection string, e.g. postgres://user:pass@localhost:5432/db",
     );
   }
+  // MCP clients leave `${VAR}` / `${env:VAR}` unexpanded when VAR is unset in their environment. Name only the placeholder, never the value.
+  // A `:-default` part is dropped from the message because it can hold credentials.
+  const unresolved = databaseUrl.match(/\$\{((?:env:)?[A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/);
+  if (unresolved) {
+    const placeholder = `\${${unresolved[1]}}`;
+    throw new Error(
+      `QUERYIO_DATABASE_URL contains the unresolved placeholder ${placeholder}. The MCP client did not substitute it, usually because the variable was not set in the environment that started the client. Set QUERYIO_DATABASE_URL there and restart the client.`,
+    );
+  }
   const positiveInt = (name: string, fallback: number): number => {
     const raw = env[name];
     if (raw === undefined || raw === "") return fallback;

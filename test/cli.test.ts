@@ -1,7 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -45,6 +45,18 @@ it("exits with a clear error when QUERYIO_DATABASE_URL is missing", () => {
   expect(run.stderr).toMatch(/QUERYIO_DATABASE_URL is not set/);
 });
 
+it("exits before connecting when the client left the connection placeholder unresolved, writing only to stderr", () => {
+  for (const placeholder of ["${QUERYIO_DATABASE_URL}", "${env:QUERYIO_DATABASE_URL}"]) {
+    for (const args of [["dist/cli.js"], ["dist/cli.js", "check"]]) {
+      const run = spawnSync("node", args, { env: { ...process.env, QUERYIO_DATABASE_URL: placeholder }, encoding: "utf8", timeout: 10_000 });
+      expect(run.status).toBe(1);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain(`unresolved placeholder ${placeholder}`);
+      expect(run.stderr).not.toMatch(/ENOTFOUND|ECONNREFUSED/);
+    }
+  }
+});
+
 it("refuses command-line arguments such as a DSN", () => {
   const run = spawnSync("node", ["dist/cli.js", "postgres://u:p@localhost/db"], {
     env: { ...process.env, QUERYIO_DATABASE_URL: TEST_URL },
@@ -82,8 +94,34 @@ it("refuses unrecognized subcommands with exit code 2", () => {
     encoding: "utf8",
   });
   expect(run.status).toBe(2);
-  expect(run.stderr).toContain("Usage: queryio [check]");
+  expect(run.stderr).toContain("Usage: queryio [check|setup]");
 });
+
+it("refuses arguments after setup, such as a DSN", () => {
+  const run = spawnSync("node", ["dist/cli.js", "setup", "postgres://u:p@localhost/db"], { encoding: "utf8" });
+  expect(run.status).toBe(2);
+  expect(run.stderr).not.toContain("u:p");
+});
+
+it("runs queryio setup from the packed tarball with piped answers, writing only to the temporary project", () => {
+  const home = join(dir, "setup-home");
+  const project = join(dir, "setup-project");
+  mkdirSync(home);
+  mkdirSync(project);
+  const env: Record<string, string | undefined> = {
+    ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: undefined, CODEX_HOME: undefined, QUERYIO_DATABASE_URL: undefined,
+  };
+  const run = spawnSync("npx", ["-y", "--package", tarball, "queryio", "setup"], {
+    cwd: project, env, input: "3\n1\ny\n", encoding: "utf8", shell: process.platform === "win32", timeout: 60_000,
+  });
+  expect(run.stdout).toContain("QueryIO setup");
+  expect(run.stdout).toContain("QUERYIO_DATABASE_URL is not set in this terminal");
+  expect(run.status).toBe(1);
+  expect(JSON.parse(readFileSync(join(project, ".cursor", "mcp.json"), "utf8")).mcpServers.queryio.env).toEqual({
+    QUERYIO_DATABASE_URL: "${env:QUERYIO_DATABASE_URL}",
+  });
+  expect(readdirSync(home)).toEqual([]);
+}, 120_000);
 
 it("runs queryio check against a read-only role, reporting no superuser and no warnings", async () => {
   const roRole = "queryio_cli_ro_role";

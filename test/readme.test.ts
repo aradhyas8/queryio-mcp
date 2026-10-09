@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -44,6 +44,13 @@ describe("README specification coverage", () => {
       "### 4. Ask a debugging question",
     ]) expect(readme).toContain(heading);
     expect(readme).toContain("npx -y queryio check");
+    expect(readme).toContain("npx -y queryio setup");
+    expect(readme).toContain("#### Manual configuration");
+    expect(readme).toContain("never writes it to a file");
+    expect(reference).toContain("## Setup wizard");
+    for (const file of [".mcp.json", "~/.claude.json", ".codex/config.toml", "~/.codex/config.toml", ".cursor/mcp.json", "~/.cursor/mcp.json"]) {
+      expect(reference).toContain(`\`${file}\``);
+    }
     expect(readme).toContain("export QUERYIO_DATABASE_URL=");
     expect(readme).toContain("$env:QUERYIO_DATABASE_URL =");
     expect(readme).toContain("Node.js 20+");
@@ -54,7 +61,7 @@ describe("README specification coverage", () => {
     expect(reference).toContain("~/.claude.json");
     expect(reference).toContain("--scope project");
     expect(readme + reference).not.toContain(".claude/mcp.json");
-    expect(readme).toContain("#### Codex");
+    expect(readme).toContain("##### Codex");
     expect(readme).toContain("~/.codex/config.toml");
     expect(readme).toContain("[mcp_servers.queryio]");
     expect(readme).toContain('env_vars = ["QUERYIO_DATABASE_URL"]');
@@ -186,15 +193,19 @@ describe("README specification coverage", () => {
     expect(readme).toContain("does not establish that QueryIO outperforms DBHub");
   });
 
-  it("contains no file:/// links and resolves all local documentation links and anchors", () => {
-    expect(readme).toMatch(/\[BENCHMARK\.md\]\((\.\/)?BENCHMARK\.md\)/);
-    for (const path of paths.slice(1)) expect(readme).toContain(`](${path})`);
+  it("uses npm-portable README links and resolves repository files and anchors", () => {
+    const repositoryFiles = "https://github.com/aradhyas8/queryio-mcp/blob/main/";
+    expect(readme).toContain(`[BENCHMARK.md](${repositoryFiles}BENCHMARK.md)`);
+    for (const path of paths.slice(1)) expect(readme).toContain(`](${repositoryFiles}${path})`);
     for (const [path, document] of Object.entries(documents)) {
       expect(document).not.toContain("file:///");
       for (const [, target] of document.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)) {
-        if (/^[a-z]+:/i.test(target)) continue;
-        const [relative, fragment] = decodeURIComponent(target).split("#");
-        const absolute = relative ? resolve(dirname(join(root, path)), relative) : join(root, path);
+        if (path === "README.md") expect(target, target).toMatch(/^(https:\/\/|#)/);
+        const repositoryLink = target.startsWith(repositoryFiles);
+        if (/^[a-z]+:/i.test(target) && !repositoryLink) continue;
+        const [relative, fragment] = decodeURIComponent(repositoryLink ? target.slice(repositoryFiles.length) : target).split("#");
+        const absolute = repositoryLink ? resolve(root, relative)
+          : relative ? resolve(dirname(join(root, path)), relative) : join(root, path);
         expect(existsSync(absolute), `${path}: ${target}`).toBe(true);
         if (!fragment) continue;
         const linked = readFileSync(absolute, "utf8");
@@ -209,9 +220,10 @@ describe("README specification coverage", () => {
 
   it("keeps inspect_row positioning explicit about its value and relationship limits", () => {
     const hero = readme.split("## Example:")[0];
-    expect(hero).toContain("PostgreSQL MCP for debugging with AI coding agents");
+    expect(hero).toContain("PostgreSQL MCP server for debugging with AI coding agents");
     expect(hero).toContain("`inspect_row`");
-    expect(hero).toContain("immediate foreign-key relationships in one call");
+    expect(hero).toContain("bounded samples of its immediate declared foreign-key relationships");
+    expect(hero).toContain("in both directions, in one call");
     expect(readme).toContain("requires a declared primary key");
     expect(readme).toContain("only declared foreign keys, one level deep");
     expect(readme).toContain(`${defaults.inspectRelatedRows} rows per relation, ${defaults.inspectMaxRelations} relations`);
@@ -299,6 +311,25 @@ describe("Clean first-run flow against real Postgres (in under 2 minutes)", () =
   afterAll(async () => {
     await dropTestTables();
     rmSync(tempDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  });
+
+  it("packages the current README and npm discovery metadata", () => {
+    const root = join(__dirname, "..");
+    const packedReadme = execFileSync("tar", ["-xOf", tarballPath, "package/README.md"], { encoding: "utf8" });
+    expect(packedReadme.replaceAll("\r\n", "\n")).toBe(readFileSync(join(root, "README.md"), "utf8").replaceAll("\r\n", "\n"));
+    const packedManifest = JSON.parse(execFileSync("tar", ["-xOf", tarballPath, "package/package.json"], { encoding: "utf8" }));
+    const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const lockfile = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8"));
+    expect(lockfile.version).toBe(manifest.version);
+    expect(lockfile.packages[""].version).toBe(manifest.version);
+    expect(packedManifest).toMatchObject({
+      name: manifest.name,
+      version: manifest.version,
+      description: manifest.description,
+      keywords: manifest.keywords,
+      bin: manifest.bin,
+      engines: manifest.engines,
+    });
   });
 
   it("runs queryio check and completes in under two minutes", async () => {

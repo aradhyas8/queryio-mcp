@@ -1,7 +1,7 @@
 {
   "name": "queryio",
-  "version": "0.1.0",
-  "description": "Bounded, read-oriented PostgreSQL investigation interface for coding agents (MCP stdio server).",
+  "version": "0.2.0",
+  "description": "PostgreSQL MCP server for AI coding agents. Inspect a row and its foreign-key relationships with inspect_row, then investigate with bounded, read-oriented SQL.",
   "author": "Aradhya Singh",
   "license": "MIT",
   "homepage": "https://github.com/aradhyas8/queryio-mcp#readme",
@@ -13,13 +13,20 @@
     "url": "https://github.com/aradhyas8/queryio-mcp/issues"
   },
   "keywords": [
-    "postgres",
     "postgresql",
+    "postgres",
     "mcp",
+    "mcp-server",
+    "postgres-mcp",
     "model-context-protocol",
-    "agent",
-    "database",
-    "sql"
+    "database-inspection",
+    "database-debugging",
+    "foreign-keys",
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "read-only"
   ],
   "type": "module",
   "bin": {
@@ -51,6 +58,7 @@
     "@modelcontextprotocol/sdk": "^1.32.0",
     "pg": "8.23.1",
     "pg-cursor": "2.22.1",
+    "smol-toml": "1.9.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

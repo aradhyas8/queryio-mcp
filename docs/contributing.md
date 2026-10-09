@@ -34,6 +34,12 @@ Use the filename printed by `npm pack` in place of `PATH_TO_TARBALL` below. Set 
 npx -y --package PATH_TO_TARBALL queryio check
 ```
 
+To try the setup wizard from the tarball, run it in a scratch project directory. It writes that project's client configuration, which references the published `queryio` package rather than the tarball:
+
+```bash
+npx -y --package PATH_TO_TARBALL queryio setup
+```
+
 For an MCP client, use `command: "npx"` and `args: ["-y", "--package", "/absolute/path/to/the/tarball", "queryio"]`. Supply the connection through the client's environment. Using an absolute tarball path avoids dependence on the client's working directory.
 
 ## Report an issue or propose a change

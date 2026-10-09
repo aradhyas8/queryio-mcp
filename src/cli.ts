@@ -5,9 +5,31 @@ import { createServer } from "./mcp.js";
 import { loadSettings, type Settings } from "./settings.js";
 
 const isCheck = process.argv.length === 3 && process.argv[2] === "check";
-if (process.argv.length > 2 && !isCheck) {
-  console.error("Usage: queryio [check]   (set QUERYIO_DATABASE_URL; command-line arguments are not accepted)");
+const isSetup = process.argv.length === 3 && process.argv[2] === "setup";
+if (process.argv.length > 2 && !isCheck && !isSetup) {
+  console.error("Usage: queryio [check|setup]   (set QUERYIO_DATABASE_URL; other command-line arguments are not accepted)");
   process.exit(2);
+}
+
+if (isSetup) {
+  // Setup never takes the connection string; it runs before settings are loaded so it can guide users without one.
+  const { createInterface } = await import("node:readline");
+  const { homedir } = await import("node:os");
+  const { fileURLToPath } = await import("node:url");
+  const { runSetup } = await import("./setup.js");
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: process.stdin.isTTY });
+  rl.on("SIGINT", () => rl.close()); // Ctrl+C ends input, which cancels setup before anything is written.
+  const code = await runSetup({
+    cwd: process.cwd(),
+    home: homedir(),
+    platform: process.platform,
+    env: { ...process.env },
+    io: { lines: rl[Symbol.asyncIterator](), write: (text) => process.stdout.write(text) },
+    serverEntry: fileURLToPath(import.meta.url),
+  });
+  rl.close();
+  await new Promise((resolve) => process.stdout.write("", resolve)); // flush piped output before exiting
+  process.exit(code);
 }
 
 let settings: Settings;

@@ -108,11 +108,11 @@ QueryIO validation categories are `read_oriented`, `not_found`, `no_primary_key`
 
 ## Configuration and defaults
 
-QueryIO reads settings from environment variables at startup. Its only subcommand is `check`; other command-line arguments, including connection strings, are rejected with exit code 2. This policy applies to the QueryIO process; MCP clients' own registration commands can still accept and persist credentials.
+QueryIO reads settings from environment variables at startup. Its only subcommands are `check` and `setup`; other command-line arguments, including connection strings, are rejected with exit code 2. This policy applies to the QueryIO process; MCP clients' own registration commands can still accept and persist credentials.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `QUERYIO_DATABASE_URL` | Required | PostgreSQL connection string. No automatic `.env` loading. |
+| `QUERYIO_DATABASE_URL` | Required | PostgreSQL connection string. No automatic `.env` loading. A placeholder left unexpanded by the client, such as `${QUERYIO_DATABASE_URL}`, stops startup with an error. |
 | `QUERYIO_STATEMENT_TIMEOUT_MS` | `5000` | PostgreSQL statement timeout within investigation transactions. |
 | `QUERYIO_LOCK_TIMEOUT_MS` | `1000` | PostgreSQL timeout for waiting to acquire locks. |
 | `QUERYIO_MAX_ROWS` | `100` | Returned row cap for `query`. |
@@ -127,6 +127,26 @@ QueryIO reads settings from environment variables at startup. Its only subcomman
 | `QUERYIO_REDACT_REMOVE` | Empty | Comma-separated column names to remove from redaction. |
 
 Numeric settings accept positive integers. Name matching for redaction is exact and case-insensitive, not a substring or content scan. Defaults: `password`, `password_hash`, `secret`, `token`, `access_token`, `refresh_token`, `api_key`, `private_key`, `credential`. See [redaction limits](security.md#redaction-and-data-exposure).
+
+## Setup wizard
+
+`npx -y queryio setup` configures QueryIO for Claude Code, Codex, and Cursor. It takes no arguments and asks its questions interactively.
+
+1. **Clients.** It detects each client from its command on `PATH` or its configuration directory, and preselects the detected ones. You can choose clients that were not detected; the wizard writes their configuration and notes that the client must be installed.
+2. **Scope.** Project scope, the default, writes to the current directory. Global scope writes to your user configuration, making QueryIO available in every project the client opens, and requires a second confirmation.
+3. **Preview.** For each file, it shows whether it will be created, added to, or left unchanged, and prints the entry. An existing, different `queryio` entry is shown with stored connection strings and literal environment values hidden, and is replaced only if you confirm. Nothing is written until you confirm the full set of changes; declining, closing input, or pressing Ctrl+C cancels without changes.
+4. **Write.** Each modified file is first copied to `~/.queryio/backups/`, outside the project so backups cannot be committed with it. Backup files are readable only by you on macOS and Linux, because an old entry may contain a stored connection string; setup names any such backup so you can delete it. The file is then replaced atomically through a temporary file. Other servers and settings are preserved, as are JSON indentation and line endings; Codex TOML is edited in place, keeping comments. If a file cannot be parsed, or cannot be updated without changing other settings, it is left unchanged and the entry to add manually is printed.
+5. **Verify.** It reads each file back. When the client's command is on `PATH`, it runs `claude mcp get queryio` or `codex mcp get queryio` and reports only their scope and status lines. Cursor is not checked automatically. If `QUERYIO_DATABASE_URL` is set, it runs the same connectivity and role check as `queryio check`, reports warnings, and starts the installed QueryIO server to list its tools.
+
+| Client | Project scope | Global scope | Connection reference |
+| --- | --- | --- | --- |
+| Claude Code | `.mcp.json` | `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` if set) | `"QUERYIO_DATABASE_URL": "${QUERYIO_DATABASE_URL}"` |
+| Codex | `.codex/config.toml` (trusted projects only) | `~/.codex/config.toml` (`$CODEX_HOME/config.toml` if set) | `env_vars = ["QUERYIO_DATABASE_URL"]` |
+| Cursor | `.cursor/mcp.json` | `~/.cursor/mcp.json` | `"QUERYIO_DATABASE_URL": "${env:QUERYIO_DATABASE_URL}"` |
+
+On Windows, the entries launch `cmd` with `/c npx -y queryio`, because `npx` is a batch shim that clients cannot always start directly. Elsewhere they launch `npx -y queryio`.
+
+The wizard does not prompt for, store, or log the connection string, and does not read `.env` files. Configuration success, client discovery, and database connectivity are reported separately. The exit code is 0 only when configuration succeeded and PostgreSQL was reachable; it is 1 when a file could not be configured, the connection variable is missing, or the connection failed, and 130 when setup is cancelled. A passing check proves the variable is available in the wizard's terminal, not in the client: start each client from an environment where `QUERYIO_DATABASE_URL` is set. If a client starts QueryIO without it, QueryIO exits before connecting and reports the unresolved placeholder on stderr. Claude Code asks you to approve a new project server; Codex loads project configuration only for trusted projects.
 
 ## Client configuration
 

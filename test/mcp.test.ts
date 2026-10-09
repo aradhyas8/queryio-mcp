@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createCore, type Core } from "../src/core.js";
 import { createServer } from "../src/mcp.js";
@@ -22,8 +23,9 @@ afterAll(async () => {
   await core.close();
 });
 
-it("reports the manifest version 0.1.0 on initialize", () => {
-  expect(client.getServerVersion()).toEqual({ name: "queryio", version: "0.1.0" });
+it("reports the package manifest version on initialize", () => {
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  expect(client.getServerVersion()).toEqual({ name: "queryio", version });
 });
 
 it("lists the query tool with its input schema", async () => {
