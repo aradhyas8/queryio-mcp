@@ -18,7 +18,7 @@ npm test
 
 The test runner starts the Compose service automatically when `QUERYIO_TEST_ADMIN_URL` is unset. It connects to `localhost:54329` and **drops and recreates the `queryio_test` database**. Use a disposable local PostgreSQL instance. `QUERYIO_TEST_ADMIN_URL` overrides the admin connection, but the database reset still applies.
 
-Tests cover query bounds, read-only transactions, timeouts, redaction, catalogs, row inspection, role checks, audit events, packed CLI startup, MCP responses, benchmark metric extraction, and documentation assertions. The assertions in [`test/readme.test.ts`](../test/readme.test.ts) currently require the former README headings and all references inline; they need an update to accommodate the split documentation.
+Tests cover query bounds, read-only transactions, timeouts, redaction, catalogs, row inspection, role checks, audit events, packed CLI startup, MCP responses, and benchmark metric extraction. Documentation assertions in [`test/readme.test.ts`](../test/readme.test.ts) check the README and linked references, including tool contracts, configuration defaults, security limits, benchmark caveats, local links, and JSON examples.
 
 ## Test the package without publishing
 

@@ -40,9 +40,9 @@ The defensible distinction from a general-purpose SQL MCP interface is the inves
 | Activation example | [`fixture/TASKS.md`](../fixture/TASKS.md), [`activation.ts`](../fixture/app/src/activation.ts), [`admin.ts`](../fixture/app/src/admin.ts), and the fixture schema/seed. This is synthetic evidence, not adoption or a testimonial. |
 | Benchmark findings | [BENCHMARK.md](../BENCHMARK.md): 25 runs, five tasks, manual grading, CLI shims, fewer DBHub repetitions, and win condition not met. Preserve aggregate regressions and failed operations; do not infer general superiority over DBHub or attribute every change to `inspect_row` in isolation. |
 
-## Proposed GitHub settings
+## GitHub settings
 
-The public repository's About description, topics, and homepage were empty when checked on 2026-10-09. These settings are prepared for review; no remote settings were changed.
+The public repository's About description and topics were empty before this update. The description and all ten topics below were applied and verified on 2026-10-09.
 
 **Description:**
 
@@ -52,7 +52,7 @@ The public repository's About description, topics, and homepage were empty when 
 
 These describe the database, protocol, use case, and documented clients. Do not add competitor names or unsupported capabilities as topics. No homepage is needed until there is a separate documentation or product site.
 
-After reviewing, apply the description and topics with GitHub CLI:
+To reproduce these settings with GitHub CLI:
 
 ```bash
 gh repo edit aradhyas8/queryio-mcp --description "PostgreSQL MCP server for debugging with AI coding agents. Inspect a record and its related rows in one call with inspect_row, then follow up with bounded, read-oriented SQL." --add-topic postgresql --add-topic mcp --add-topic mcp-server --add-topic model-context-protocol --add-topic database-debugging --add-topic developer-tools --add-topic claude-code --add-topic codex --add-topic cursor --add-topic read-only
@@ -76,13 +76,13 @@ The previous introduction led with bounds and safety, called competing interface
 
 The new quick start also corrects Claude Code's scope explanation and forwards credentials from the environment. The audit reference uses the actual `ts` field, describes the shortened SQL hash, and notes that logging can fail without stopping a call.
 
-Remaining release work is separate: package metadata edits, npm publishing, directory submissions, and a website. The existing tests' literal README assertions also require a separately authorized update before the full documentation test suite can pass with the new structure. No implementation, tool contracts, tests, or package metadata are changed here.
+Remaining release work is separate: package metadata edits, npm publishing, directory submissions, and a website. Documentation assertions cover the README and linked reference files. Application behavior, MCP tool contracts, and package metadata are unchanged.
 
 ## Validation for this revision
 
 - Type checking and the TypeScript build passed.
 - The public `npx -y queryio check` command connected successfully to the disposable PostgreSQL test database.
 - The sample activation investigation was exercised through the actual MCP server against the seeded fixture, including its ground-truth assertions. The default inspection returned the membership in organization 21 and the transfer event; the README's follow-up SQL returned zero matching memberships in organization 88.
-- The existing test suite produced 125 passes and seven failures. Every failure was a literal README assertion requiring the previous headings or inline reference content. These assertions were left unchanged under the requested scope; the full CI test gate will fail until they are updated.
+- The complete test suite passed: **134 tests, zero failures, zero skipped**. The seven legacy README failures were traced to obsolete headings or expectations that all reference material remain inline. The assertions now check the appropriate documents while preserving tool contracts, configuration defaults, security caveats, and benchmark limitations. Additional checks cover local links/anchors, parseable JSON examples, client configuration, and the scope of `inspect_row`.
 - Local documentation links and anchors, JSON/TOML snippets, and coverage of every existing environment setting were checked. Client configuration syntax was checked against official documentation; interactive sessions in Claude Code and Cursor were not run.
-- The original benchmark report and raw results were preserved. No benchmark agents were launched, and no package was published or remote GitHub setting changed.
+- The original benchmark report and raw results were preserved. No benchmark agents were launched or package published. The GitHub About description and all ten topics were applied and verified.
