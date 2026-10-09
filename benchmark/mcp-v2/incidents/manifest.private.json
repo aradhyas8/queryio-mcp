@@ -1,0 +1,336 @@
+{
+  "suite": "adventureworks-incidents",
+  "version": 1,
+  "note": "PRIVATE ground truth. Read only by the validator and the grader; never shown to benchmarked agents. All tasks are Type B (injected incidents): see README for why no Type A tasks were kept.",
+  "tasks": {
+    "sales-e01": {
+      "difficulty": "easy", "category": "shipping", "type": "injected",
+      "expected": {
+        "root_cause": "Order 72902's ship-to address (shiptoaddressid) points to address 11431 (8, rue des Vendangeurs, Paris), which belongs to a different customer (Laura Cai, person 2411 / customer 21113), not to the ordering customer. The ship-to address on the order was set to the wrong address record.",
+        "required_facts": [
+          "Order 72902 belongs to customer 11878 (Christine Nara, person 19889).",
+          "The order's shiptoaddressid is 11431, an address in Paris, France.",
+          "Address 11431 is linked to another person/customer (Laura Cai, 2411 / customer 21113), not to Christine Nara.",
+          "The customer's own (only) address is 28990 in Ballard, Washington; it is still the bill-to address of 72902 and was the ship-to of her earlier order 72001."
+        ],
+        "not_root_cause": ["The customer moved or has a French address on file", "A carrier/shipping-method problem"]
+      },
+      "evidence": [{ "table": "sales.salesorderheader", "key": { "salesorderid": 72902 } }, { "table": "person.address", "key": { "addressid": 11431 } }, { "table": "person.businessentityaddress", "key": { "businessentityid": 2411, "addressid": 11431, "addresstypeid": 2 } }]
+    },
+    "purch-e02": {
+      "difficulty": "easy", "category": "purchasing", "type": "injected",
+      "expected": {
+        "root_cause": "Every unit received on PO 2467 was rejected: on both detail lines rejectedqty equals receivedqty, so nothing was accepted into stock (and no inventory receipt transactions exist for the PO).",
+        "required_facts": [
+          "PO 2467 has status 4 (complete).",
+          "Both lines show receivedqty equal to rejectedqty (all received units rejected), 1,100 units in total.",
+          "There are no receipt ('P') transactions in production.transactionhistory for PO 2467."
+        ],
+        "not_root_cause": ["The goods were never shipped or received", "The PO was cancelled"]
+      },
+      "evidence": [{ "table": "purchasing.purchaseorderheader", "key": { "purchaseorderid": 2467 } }, { "table": "purchasing.purchaseorderdetail", "key": { "purchaseorderid": 2467 } }]
+    },
+    "hr-e03": {
+      "difficulty": "easy", "category": "employees", "type": "injected",
+      "expected": {
+        "root_cause": "Britta Simon has two open department history rows: her Production assignment (since 2009-01-29) was never end-dated when a Quality Assurance assignment starting 2025-03-03 was added.",
+        "required_facts": [
+          "Employee 30 has two employeedepartmenthistory rows with enddate NULL.",
+          "One is Production (department 7) starting 2009-01-29; the other is Quality Assurance (department 13) starting 2025-03-03.",
+          "The old Production row should have been closed (end-dated) when the new assignment began."
+        ],
+        "not_root_cause": ["Two separate employee records for the same person"]
+      },
+      "evidence": [{ "table": "humanresources.employeedepartmenthistory", "key": { "businessentityid": 30 } }]
+    },
+    "sales-e04": {
+      "difficulty": "easy", "category": "pricing", "type": "injected",
+      "expected": {
+        "root_cause": "Yes. The Sport-100 Helmet, Blue line (salesorderdetailid 119272) was charged a unit price of 349.90 instead of the 34.99 list price in effect on the order date - a decimal-shift (10x) pricing error. The order totals include the overcharge (314.91 on the subtotal).",
+        "required_facts": [
+          "Line 119272 (product 711, Sport-100 Helmet, Blue, qty 1) has unitprice 349.90.",
+          "The list price effective on the order date (productlistpricehistory / product.listprice) is 34.99.",
+          "The overcharge is 314.91 before tax and freight; the order subtotal/total include it."
+        ],
+        "not_root_cause": ["A discount was missing", "The customer ordered a different quantity"]
+      },
+      "evidence": [{ "table": "sales.salesorderdetail", "key": { "salesorderid": 74219, "salesorderdetailid": 119272 } }, { "table": "production.productlistpricehistory", "key": { "productid": 711 } }]
+    },
+    "purch-e05": {
+      "difficulty": "easy", "category": "vendors", "type": "injected",
+      "expected": {
+        "root_cause": "The HL Mountain Pedal (product 937) has exactly one approved supplier in productvendor, Inline Accessories (vendor 1638), and that vendor is now inactive (activeflag = false).",
+        "required_facts": [
+          "Product 937's only productvendor row is for vendor 1638, Inline Accessories.",
+          "Vendor 1638 has activeflag = false.",
+          "The product itself is not discontinued (no sell end / discontinued date)."
+        ],
+        "not_root_cause": ["The product is discontinued", "The vendor's credit rating"]
+      },
+      "evidence": [{ "table": "purchasing.productvendor", "key": { "productid": 937, "businessentityid": 1638 } }, { "table": "purchasing.vendor", "key": { "businessentityid": 1638 } }]
+    },
+    "sales-m01": {
+      "difficulty": "medium", "category": "territories", "type": "injected",
+      "expected": {
+        "root_cause": "The customer record itself was reassigned: sales.customer 12961 now has territoryid 5 (Southeast), changed on 2025-05-15, although the customer's only address is still in Beaverton, Oregon (Northwest). Orders take the customer's territory, so the June order 74780 was booked to Southeast while the April order 70034 was Northwest.",
+        "required_facts": [
+          "Customer 12961 has territoryid 5 (Southeast) with a modified date of 2025-05-15.",
+          "The customer's address (Beaverton, Oregon) is in a state/province that belongs to the Northwest territory (1).",
+          "Order 70034 (April 2025) has territory 1; order 74780 (June 2025) has territory 5; both ship to the same address."
+        ],
+        "not_root_cause": ["The customer moved", "A salesperson assignment (online orders have no salesperson)"]
+      },
+      "evidence": [{ "table": "sales.customer", "key": { "customerid": 12961 } }, { "table": "sales.salesorderheader", "key": { "salesorderid": 74780 } }]
+    },
+    "sales-m02": {
+      "difficulty": "medium", "category": "payments", "type": "injected",
+      "expected": {
+        "root_cause": "Order 74509 was charged to credit card 18027, which belongs to another person (Arturo Sun, person 10006 / customer 11498) according to sales.personcreditcard. The customer's own card is 11266, which was used on all four of their other orders.",
+        "required_facts": [
+          "Order 74509 (2025-06-10, customer 14282) has creditcardid 18027.",
+          "Card 18027 is linked in personcreditcard to person 10006 (Arturo Sun), not to the customer's person 11739 (Brianna Lewis).",
+          "The customer's own card is 11266, used on their other orders."
+        ],
+        "not_root_cause": ["The customer's card expired", "Fraud by the customer"]
+      },
+      "evidence": [{ "table": "sales.salesorderheader", "key": { "salesorderid": 74509 } }, { "table": "sales.personcreditcard", "key": { "businessentityid": 10006, "creditcardid": 18027 } }]
+    },
+    "prod-m03": {
+      "difficulty": "medium", "category": "pricing", "type": "injected",
+      "expected": {
+        "root_cause": "The price history for product 877 has two open-ended rows: the new 8.95 row starting 2025-06-01 was added, but the previous 7.95 row (start 2024-05-29) was never end-dated, so the old price remains effective and was used for June orders.",
+        "required_facts": [
+          "productlistpricehistory for 877 has two rows with enddate NULL: 7.95 from 2024-05-29 and 8.95 from 2025-06-01.",
+          "product.listprice is 8.95.",
+          "June 2025 order lines for product 877 were priced 7.95."
+        ],
+        "not_root_cause": ["The price change was never entered", "A discount/special offer"]
+      },
+      "evidence": [{ "table": "production.productlistpricehistory", "key": { "productid": 877 } }]
+    },
+    "inv-m04": {
+      "difficulty": "medium", "category": "inventory", "type": "injected",
+      "expected": {
+        "root_cause": "Transaction 196618 (type S) records 300 units of Front Brakes for sales order 71775, but that order's line for product 948 is for only 3 units. The inventory transaction quantity was entered 100x too high; the sales order itself is correct.",
+        "required_facts": [
+          "Transaction 196618 is a sales ('S') transaction for product 948 on 2025-04-30 with quantity 300.",
+          "Its referenceorderid 71775 is a sales order whose Front Brakes line has orderqty 3.",
+          "The discrepancy is in the transaction record (quantity), not the order."
+        ],
+        "not_root_cause": ["A customer actually ordered 300 units", "Theft or shrinkage"]
+      },
+      "evidence": [{ "table": "production.transactionhistory", "key": { "transactionid": 196618 } }, { "table": "sales.salesorderdetail", "key": { "salesorderid": 71775 } }]
+    },
+    "purch-m05": {
+      "difficulty": "medium", "category": "purchasing", "type": "injected",
+      "expected": {
+        "root_cause": "PO 3784 has vendorid 1636 (Integrated Sport Products, an apparel vendor), but Touring Pedal (product 941) is supplied only by Bicycle Specialists (vendor 1628) according to productvendor, and every other PO for it went to 1628. The PO was assigned to the wrong vendor.",
+        "required_facts": [
+          "PO 3784 is for 550 units of product 941 (Touring Pedal) with vendorid 1636.",
+          "productvendor has no row for product 941 and vendor 1636; the only supplier is vendor 1628 (Bicycle Specialists).",
+          "Integrated Sport Products supplies clothing/accessories, not pedals."
+        ],
+        "not_root_cause": ["The vendor stopped supplying pedals", "The product number is wrong"]
+      },
+      "evidence": [{ "table": "purchasing.purchaseorderheader", "key": { "purchaseorderid": 3784 } }, { "table": "purchasing.productvendor", "key": { "productid": 941, "businessentityid": 1628 } }]
+    },
+    "sales-m06": {
+      "difficulty": "medium", "category": "organization", "type": "injected",
+      "expected": {
+        "root_cause": "The store's assigned salesperson, Rachel Valdez (employee 288), left the company: her employee record has currentflag = false and her department assignment ended 2025-02-14. The store (sales.store.salespersonid = 288) was never reassigned, so its April orders (71692, 71910) are still credited to her.",
+        "required_facts": [
+          "Store 1020 (Bicycle Warehouse Inc., customer 29812) has salespersonid 288.",
+          "Orders 71692 and 71910 (April 2025) are credited to salesperson 288.",
+          "Employee 288 has currentflag = false and her department history ended on 2025-02-14.",
+          "No reassignment of the store or her accounts was made."
+        ],
+        "not_root_cause": ["The orders have no salesperson", "A territory change"]
+      },
+      "evidence": [{ "table": "sales.store", "key": { "businessentityid": 1020 } }, { "table": "humanresources.employee", "key": { "businessentityid": 288 } }, { "table": "humanresources.employeedepartmenthistory", "key": { "businessentityid": 288 } }]
+    },
+    "sales-m07": {
+      "difficulty": "medium", "category": "discounts", "type": "injected",
+      "expected": {
+        "root_cause": "The order line (salesorderdetailid 102716) is linked to special offer 5, 'Volume Discount 41 to 60' (15%, minimum quantity 41), even though only 4 units were ordered. The line was attached to a volume tier it does not qualify for; it should have had no discount.",
+        "required_facts": [
+          "Line 102716 for product 869 (Women's Mountain Shorts, L), qty 4, has specialofferid 5 and unitpricediscount 0.15.",
+          "Special offer 5 is 'Volume Discount 41 to 60' with minqty 41 and maxqty 60.",
+          "4 units is below the offer's minimum quantity."
+        ],
+        "not_root_cause": ["A seasonal or clearance promotion", "A price list change"]
+      },
+      "evidence": [{ "table": "sales.salesorderdetail", "key": { "salesorderid": 69420, "salesorderdetailid": 102716 } }, { "table": "sales.specialoffer", "key": { "specialofferid": 5 } }]
+    },
+    "sales-m08": {
+      "difficulty": "medium", "category": "shipping", "type": "injected",
+      "expected": {
+        "root_cause": "All lines of order 69391 carry carrier tracking number 4EEB-44A4-9C, which is the tracking number of a different order, 69389 (Metro Manufacturing), shipped the same day to a different address. Order 69391 has no tracking number of its own, so its shipment was recorded under (or mixed up with) another customer's package.",
+        "required_facts": [
+          "Order 69391's detail lines have carriertrackingnumber 4EEB-44A4-9C.",
+          "The same tracking number is used by order 69389 for Metro Manufacturing, another customer, shipped on 2025-04-06 to a different address.",
+          "Tracking numbers are otherwise unique per order."
+        ],
+        "not_root_cause": ["Wrong ship-to address on order 69391", "The order was never marked shipped"]
+      },
+      "evidence": [{ "table": "sales.salesorderdetail", "key": { "salesorderid": 69391 } }, { "table": "sales.salesorderdetail", "key": { "salesorderid": 69389 } }]
+    },
+    "sales-m09": {
+      "difficulty": "medium", "category": "payments", "type": "injected",
+      "expected": {
+        "root_cause": "Order 75031 is paid by credit card (creditcardid 13131) but has no credit card approval code (creditcardapprovalcode is NULL); every other card-paid order has one. The payment was never authorized, so the order stays in process (status 1) with no ship date.",
+        "required_facts": [
+          "Order 75031 has status 1 and no shipdate.",
+          "It has a creditcardid but creditcardapprovalcode is NULL.",
+          "Other card-paid orders (including the rest of 2025-06-27) have approval codes and shipped on 2025-07-04."
+        ],
+        "not_root_cause": ["Products out of stock", "Address problem"]
+      },
+      "evidence": [{ "table": "sales.salesorderheader", "key": { "salesorderid": 75031 } }]
+    },
+    "person-m10": {
+      "difficulty": "medium", "category": "customers", "type": "injected",
+      "expected": {
+        "root_cause": "Another customer, Miguel Perez (person 4128 / customer 13184), has the same email address as customer 12145's person (Brandon Butler, 6910): brandon11@adventure-works.com, set on 2025-04-20. Miguel Perez placed order 72190 on 2025-05-04, so its confirmation went to Brandon Butler's inbox.",
+        "required_facts": [
+          "Customer 12145 is Brandon Butler (person 6910) with email brandon11@adventure-works.com.",
+          "Person 4128 (Miguel Perez, customer 13184) has the same email address (modified 2025-04-20).",
+          "Customer 13184 placed order 72190 on 2025-05-04."
+        ],
+        "not_root_cause": ["Customer 12145 placed the order and forgot", "A duplicate customer record for Brandon Butler"]
+      },
+      "evidence": [{ "table": "person.emailaddress", "key": { "businessentityid": 4128 } }, { "table": "sales.salesorderheader", "key": { "salesorderid": 72190 } }]
+    },
+    "hr-h01": {
+      "difficulty": "hard", "category": "purchasing", "type": "injected",
+      "expected": {
+        "root_cause": "Arvind Rao (employee 252) transferred from Purchasing to Marketing on 2025-07-15 (his Purchasing department history row ends 2025-07-14 and a Marketing row starts 2025-07-15; job title now Marketing Specialist), but 13 purchase orders dated 2025-07-15 or later still list him as the ordering employee.",
+        "required_facts": [
+          "The employee is Arvind Rao (252).",
+          "Department history: Purchasing (5) until 2025-07-14, Marketing (4) from 2025-07-15.",
+          "13 purchase orders dated on or after 2025-07-15 have employeeid 252.",
+          "All other purchase orders were placed by employees who were in Purchasing at the time."
+        ],
+        "not_root_cause": ["A buyer who left the company entirely", "Purchase orders from before the transfer"]
+      },
+      "evidence": [{ "table": "humanresources.employeedepartmenthistory", "key": { "businessentityid": 252 } }, { "table": "purchasing.purchaseorderheader", "key": { "employeeid": 252 } }]
+    },
+    "inv-h02": {
+      "difficulty": "hard", "category": "inventory", "type": "injected",
+      "expected": {
+        "root_cause": "The receipt was booked against the wrong product: inventory transaction 200016 (type P, referenceorderid 2829, quantity 550) is recorded for ML Road Rim (product 511) instead of HL Road Rim (512). PO 2829 contains only HL Road Rim, so the 550 units were added to ML Road Rim's stock.",
+        "required_facts": [
+          "PO 2829 has one line: 550 HL Road Rims (product 512), received 550.",
+          "Transaction 200016 is a 'P' receipt referencing PO 2829 for 550 units, but its productid is 511 (ML Road Rim).",
+          "No receipt for product 512 references PO 2829."
+        ],
+        "not_root_cause": ["The vendor did not deliver", "The units were rejected"]
+      },
+      "evidence": [{ "table": "production.transactionhistory", "key": { "transactionid": 200016 } }, { "table": "purchasing.purchaseorderdetail", "key": { "purchaseorderid": 2829 } }]
+    },
+    "hr-h03": {
+      "difficulty": "hard", "category": "organization", "type": "injected",
+      "expected": {
+        "root_cause": "Patrick Cook's (employee 83) position in the organization hierarchy was changed: his organizationnode is /1/1/8/, which places him directly under /1/1/, the Engineering Manager (Roberto Tamburello, employee 3). His job title (Production Technician - WC40) and department history (Production) are unchanged, so he should sit under a WC40 production supervisor (his original supervisor was Reuben D'sa, employee 78, /3/1/7/; the data no longer records which one, so naming any WC40 Production Supervisor as the expected manager is acceptable). The hierarchy node was mis-set (employee record modified 2025-05-12) without any actual transfer.",
+        "required_facts": [
+          "Employee 83 has organizationnode /1/1/8/, whose parent /1/1/ is the Engineering Manager (Roberto Tamburello, employee 3).",
+          "He is still a 'Production Technician - WC40' in the Production department (no department change).",
+          "Production technicians otherwise report to production supervisors (WC40 supervisors are employees 78, 127, 192); his node is the only one out of place."
+        ],
+        "not_root_cause": ["He was transferred to Engineering", "His supervisor left"]
+      },
+      "evidence": [{ "table": "humanresources.employee", "key": { "businessentityid": 83 } }, { "table": "humanresources.employee", "key": { "businessentityid": 78 } }, { "table": "humanresources.employee", "key": { "businessentityid": 3 } }]
+    },
+    "prod-h04": {
+      "difficulty": "hard", "category": "production", "type": "injected",
+      "expected": {
+        "root_cause": "The bill of materials for Mountain-200 Black, 38 (product 782) was changed on 2025-04-01: the size-38 frame (747, HL Mountain Frame - Black, 38) was end-dated 2025-03-31 and replaced by the size-46 frame (746, HL Mountain Frame - Black, 46). Assemblies are built with a frame of the wrong size, so every work order since April is scrapped; the 'Drill pattern incorrect' scrap reason is a symptom of the mismatched frame, not of the drilling equipment.",
+        "required_facts": [
+          "BOM row for assembly 782 / component 747 ends 2025-03-31; a new row for component 746 (size 46) starts 2025-04-01.",
+          "All 47 work orders for 782 starting 2025-04-01 or later are fully scrapped with scrap reason 'Drill pattern incorrect'; earlier work orders had essentially no scrap.",
+          "The other Mountain-200 sizes/colors have no comparable scrap spike, and their BOMs keep matching frames."
+        ],
+        "not_root_cause": ["Faulty drilling equipment", "Operator error at a work center"]
+      },
+      "evidence": [{ "table": "production.billofmaterials", "key": { "billofmaterialsid": 3483 } }, { "table": "production.billofmaterials", "key": { "billofmaterialsid": 2314 } }, { "table": "production.workorder", "key": { "productid": 782 } }]
+    },
+    "sales-h05": {
+      "difficulty": "hard", "category": "sales", "type": "injected",
+      "expected": {
+        "root_cause": "Order 53451 contains a duplicated line: Touring-2000 Blue, 60 (product 953) appears twice (detail 46745 and a second line 121318) for 2 units at 728.91 each, so the order subtotal includes an extra 1,457.82. The duplicate was added later (modified 2024-08-13) and has no matching shipment transaction - only one shipment of 2 units exists. The Touring-3000 promotion discount on the other line is legitimate and not the cause.",
+        "required_facts": [
+          "Order 53451 has two identical lines for product 953 (2 units at 728.91).",
+          "The extra line adds 1,457.82 to the subtotal (more with tax and freight).",
+          "Only one sales transaction (2 units of product 953) exists for order 53451; the second line was never shipped.",
+          "The 15% Touring-3000 promotion on product 965 is a valid discount, not the problem."
+        ],
+        "not_root_cause": ["The promotional discount was applied incorrectly", "Wrong unit price"]
+      },
+      "evidence": [{ "table": "sales.salesorderdetail", "key": { "salesorderid": 53451, "salesorderdetailid": 121318 } }, { "table": "sales.salesorderdetail", "key": { "salesorderid": 53451, "salesorderdetailid": 46745 } }, { "table": "production.transactionhistory", "key": { "transactionid": 100093 } }]
+    },
+    "sales-h06": {
+      "difficulty": "hard", "category": "financial", "type": "injected",
+      "expected": {
+        "root_cause": "Order 73806 references currency rate 12377, which is the USD->JPY rate (119.84) for 2025-05-25, instead of the USD->GBP rate 12376 (0.6282) used by the other UK orders that day. The United Kingdom's currency is GBP (countryregioncurrency), so the order's local-currency conversion uses the wrong currency.",
+        "required_facts": [
+          "Order 73806 (territory United Kingdom) has currencyrateid 12377.",
+          "Rate 12377 converts USD to JPY (averagerate 119.84), not GBP.",
+          "Other UK orders on 2025-05-25 use rate 12376 (USD->GBP, 0.6282); GB's currency is GBP."
+        ],
+        "not_root_cause": ["Wrong order amounts", "The customer is not in the UK"]
+      },
+      "evidence": [{ "table": "sales.salesorderheader", "key": { "salesorderid": 73806 } }, { "table": "sales.currencyrate", "key": { "currencyrateid": 12377 } }]
+    },
+    "sales-h07": {
+      "difficulty": "hard", "category": "territories", "type": "injected",
+      "expected": {
+        "root_cause": "Salesperson Linda Mitchell (276) was reassigned from Southwest (4) to Canada (6) effective 2025-02-01 in sales.salesterritoryhistory (Southwest row ended 2025-01-31) and in sales.salesperson.territoryid, although her reseller accounts are still Southwest customers. Her orders since February are booked to territory 6 (Canada) instead of 4, moving Southwest revenue to Canada.",
+        "required_facts": [
+          "Salesperson 276 (Linda Mitchell): territory history 4 until 2025-01-31, then 6 from 2025-02-01; salesperson.territoryid = 6.",
+          "Her orders since 2025-02-01 carry territoryid 6 while their customers have territoryid 4 (Southwest).",
+          "Customer order volume in the Southwest is unchanged; the drop equals the orders re-booked to Canada."
+        ],
+        "not_root_cause": ["Southwest customers stopped ordering", "New Canadian customers"]
+      },
+      "evidence": [{ "table": "sales.salesterritoryhistory", "key": { "businessentityid": 276 } }, { "table": "sales.salesperson", "key": { "businessentityid": 276 } }]
+    },
+    "prod-h08": {
+      "difficulty": "hard", "category": "products", "type": "injected",
+      "expected": {
+        "root_cause": "The standard cost of Sport-100 Helmet, Red (product 707) jumped from 13.0863 to 130.8630 effective 2025-05-01 (new productcosthistory row; product.standardcost updated) - a 10x data-entry error. With a list price of 34.99, every red helmet now shows a large negative margin; the other helmets (Black 708, Blue 711) still cost 13.0863.",
+        "required_facts": [
+          "productcosthistory for 707: 13.0863 until 2025-04-30, then 130.8630 from 2025-05-01.",
+          "product 707's standard cost (130.863) exceeds its list price (34.99).",
+          "The other helmets' costs and all helmet list prices are unchanged."
+        ],
+        "not_root_cause": ["A helmet discount or promotion", "A list price cut"]
+      },
+      "evidence": [{ "table": "production.productcosthistory", "key": { "productid": 707 } }, { "table": "production.product", "key": { "productid": 707 } }]
+    },
+    "purch-h09": {
+      "difficulty": "hard", "category": "purchasing", "type": "injected",
+      "expected": {
+        "root_cause": "Yes: purchase order 3277 (Norstan Bike Hut, 2025-06-10) exists twice. PO 4013 is a duplicate with the same vendor, buyer, order date, six lines, quantities, prices and totals (entered 2025-06-24). Only PO 3277 has inventory receipt transactions; PO 4013 has none, so only one delivery happened and 4013 should not be paid.",
+        "required_facts": [
+          "POs 3277 and 4013 have the same vendor (Norstan Bike Hut), order date, employee, lines and totals.",
+          "PO 4013 was created later (modified 2025-06-24) and is out of sequence with surrounding PO ids.",
+          "Receipt ('P') transactions exist for PO 3277's six lines and none for PO 4013."
+        ],
+        "not_root_cause": ["Two genuine separate deliveries", "Price discrepancy on the invoice"]
+      },
+      "evidence": [{ "table": "purchasing.purchaseorderheader", "key": { "purchaseorderid": 4013 } }, { "table": "purchasing.purchaseorderheader", "key": { "purchaseorderid": 3277 } }]
+    },
+    "sales-h10": {
+      "difficulty": "hard", "category": "discounts", "type": "injected",
+      "expected": {
+        "root_cause": "The expired 'Mountain Tire Sale' promotion (special offer 10, 50% off, started 2024-05-13) was re-activated: its enddate is now 2025-12-31 (modified 2025-05-31). All June 2025 online mountain tire lines (LL/ML/HL Mountain Tire, products 928-930) were sold under offer 10 with a 50% discount.",
+        "required_facts": [
+          "June 2025 online lines for products 928, 929, 930 have specialofferid 10 and unitpricediscount 0.5.",
+          "Special offer 10 'Mountain Tire Sale' (50%) has enddate 2025-12-31 and modifieddate 2025-05-31; it began 2024-05-13 and was a short summer promotion.",
+          "Tire list prices did not change; no other online sales use a discount."
+        ],
+        "not_root_cause": ["A list price cut", "Lower sales volume"]
+      },
+      "evidence": [{ "table": "sales.specialoffer", "key": { "specialofferid": 10 } }, { "table": "sales.specialofferproduct", "key": { "specialofferid": 10 } }]
+    }
+  }
+}

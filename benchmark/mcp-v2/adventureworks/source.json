@@ -1,0 +1,21 @@
+{
+  "name": "AdventureWorks 2014 OLTP for PostgreSQL",
+  "conversion": {
+    "repository": "https://github.com/lorint/AdventureWorks-for-Postgres",
+    "commit": "b474991f0df1c4bf55ca4735eb0254ca0709eed2",
+    "license": "MIT",
+    "files": {
+      "install.sql": "27f71c99365aa5f44dba5d3b7ca092a654fcf50e6931c4dbe96ba2a13f8b7e0e",
+      "update_csvs.rb": "f9c2575c21f1fc68ac9af655cb47d59ffbc1a85c1ae1b75312bb29994defa2b2",
+      "LICENSE": "4eb50d9ccbc26bbdcab24778da282a3fae72f0cd29e773bfc5fa7caae9b0f231"
+    }
+  },
+  "data": {
+    "repository": "https://github.com/microsoft/sql-server-samples",
+    "release": "adventureworks",
+    "url": "https://github.com/Microsoft/sql-server-samples/releases/download/adventureworks/AdventureWorks-oltp-install-script.zip",
+    "license": "MIT (microsoft/sql-server-samples)",
+    "sha256": "58962e94ea386ef7cd3d8a08211bfd42a79d9b81bdd68fd4b6b0051de6c5bd42"
+  },
+  "postgres_image": "postgres:16.10-bookworm"
+}

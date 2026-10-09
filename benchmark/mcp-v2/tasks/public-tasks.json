@@ -1,0 +1,32 @@
+{
+  "suite": "adventureworks-incidents",
+  "version": 1,
+  "note": "Questions only. Ground truth lives in incidents/manifest.private.json and is never shown to the benchmarked agent.",
+  "tasks": [
+    { "id": "sales-e01", "question": "Sales order 72902 was shipped to an address in France, but the customer lives in Washington state and has never moved. What went wrong?" },
+    { "id": "purch-e02", "question": "Purchase order 2467 is marked complete, yet none of the goods on it ever went into stock. Why?" },
+    { "id": "hr-e03", "question": "Headcount reports count Britta Simon (employee ID 30) in two departments at the same time. Why?" },
+    { "id": "sales-e04", "question": "A customer says online sales order 74219 charged them far more than the catalog price for one of the items. Is the customer right, and what went wrong?" },
+    { "id": "purch-e05", "question": "Purchasing says they cannot reorder the HL Mountain Pedal (product number PD-M562) from any supplier. Why?" },
+    { "id": "sales-m01", "question": "Customer 12961's June 2025 order was credited to the Southeast sales territory, while their April 2025 order was credited to the Northwest. The customer has not moved. Why did the territory change?" },
+    { "id": "sales-m02", "question": "Customer 14282 says they do not recognize the credit card that was charged for their order of June 10, 2025. Investigate." },
+    { "id": "prod-m03", "question": "The list price of Bike Wash - Dissolver was raised to $8.95 effective June 1, 2025, but online orders placed after that date were still charged $7.95. Why?" },
+    { "id": "inv-m04", "question": "Inventory reconciliation shows 300 units of Front Brakes leaving stock in a single sales transaction on April 30, 2025. No customer ordered anywhere near that many. What happened?" },
+    { "id": "purch-m05", "question": "The vendor Integrated Sport Products says it received purchase order 3784 for 550 Touring Pedals, a product it has never supplied to us. What went wrong?" },
+    { "id": "sales-m06", "question": "The reseller Bicycle Warehouse Inc. says nobody from our sales team has been in touch since February 2025, yet its April 2025 orders show an assigned salesperson. What is going on?" },
+    { "id": "sales-m07", "question": "Reseller order 69420 received a 15% discount on Women's Mountain Shorts even though only 4 units were ordered. Why was the discount applied?" },
+    { "id": "sales-m08", "question": "Two-Wheeled Transit Company says reseller order 69391 never arrived, although our records show it shipped on April 6, 2025. Investigate what went wrong." },
+    { "id": "sales-m09", "question": "Online order 75031, placed on June 27, 2025, is still in process and has not shipped, while the other orders placed that day shipped on July 4. What is holding it up?" },
+    { "id": "person-m10", "question": "Customer 12145 says that in May 2025 they received an order confirmation email for an order they never placed. Why?" },
+    { "id": "hr-h01", "question": "Internal audit says that some purchase orders placed in the second half of 2025 were issued under the name of an employee who was no longer working as a buyer at the time. Identify the employee and the affected purchase orders, and explain the inconsistency." },
+    { "id": "inv-h02", "question": "American Bikes delivered 550 HL Road Rims on purchase order 2829 in May 2025, and the purchase order shows them as received, but the inventory transaction history for HL Road Rim has no receipt for that delivery. Where did the units go?" },
+    { "id": "hr-h03", "question": "Patrick Cook, a production technician, says his time-off requests are being routed to the Engineering Manager instead of his production supervisor. Find out why." },
+    { "id": "prod-h04", "question": "Since April 2025, nearly every work order for the Mountain-200 Black, 38 has ended with the entire quantity scrapped. The scrap records blame the drilling step, but the drilling equipment was inspected and is fine. What changed?" },
+    { "id": "sales-h05", "question": "The customer on reseller order 53451 says the invoice total is much higher than the order they actually placed. Find the cause." },
+    { "id": "sales-h06", "question": "Finance flagged online order 73806, from a customer in the United Kingdom: the local-currency amount derived for it is wildly out of line with similar orders placed the same day. What is wrong with the order?" },
+    { "id": "sales-h07", "question": "Starting in February 2025, the Southwest territory's reseller sales dropped sharply while Canada's jumped, even though Southwest resellers kept ordering at their usual pace. Explain." },
+    { "id": "prod-h08", "question": "Gross margin for the Helmets product subcategory turned sharply negative from May 2025, although helmet prices and sales volumes did not change. What happened?" },
+    { "id": "purch-h09", "question": "Accounts payable suspects that Norstan Bike Hut billed us twice for a single June 2025 delivery. Is that right? Investigate." },
+    { "id": "sales-h10", "question": "Online revenue from mountain tires in June 2025 is about half of what unit sales would suggest at list price. Why?" }
+  ]
+}

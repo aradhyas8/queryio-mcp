@@ -1,0 +1,751 @@
+{
+  "suite_hash": "45a20eb0c8ec50f3509ee43eb87038dc78f3e884c057c259a2c10ef2c6079d2a",
+  "base_digest": "54d121b9b104b1c90582ddefaa9dc65927ebf4381ee35b77ae8d6747c77accc6",
+  "tasks": {
+    "sales-e01": {
+      "ok": true,
+      "digest": "447a5b63ac64e20eb8fe241f078a48e3641a4b8ce37e7c6868a94cbcd19ad92e",
+      "changed_tables": [
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "order 72902 ships to an address that is not one of its customer's addresses",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the ship-to address 11431 is in France and belongs to person 2411 (customer 21113)",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "the customer has exactly one address (28990, Washington), still the bill-to, also used by order 72001",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other order ships to one of its customer's addresses",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "purch-e02": {
+      "ok": true,
+      "digest": "c1c012adf2d544617c4f902242fb47ce9690fe0fb9bc02622542d8ea6f97fff5",
+      "changed_tables": [
+        "production.transactionhistory",
+        "purchasing.purchaseorderdetail"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "PO 2467 is complete and every received unit was rejected",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "no receipt transactions exist for PO 2467",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other fully rejected PO has status 3 (rejected); no other complete PO is fully rejected",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "hr-e03": {
+      "ok": true,
+      "digest": "0879ebd36b935ca2a0defed40e0c4763f440f843df31a35a9cc19459d3694bfb",
+      "changed_tables": [
+        "humanresources.employeedepartmenthistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "employee 30 has two open department assignments",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the open assignments are Production (since 2009-01-29) and Quality Assurance (since 2025-03-03)",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other employee has exactly one open assignment",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-e04": {
+      "ok": true,
+      "digest": "70bed8d5fa409bb6a7c6ff0e1d3dfd2ccadf4141cb8f77871cb8aa9a58489993",
+      "changed_tables": [
+        "sales.salesorderdetail",
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "line 119272 is priced 10x the list price effective on the order date",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the header subtotal and total include the overcharge consistently",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other online line matches the list price effective on its order date",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "purch-e05": {
+      "ok": true,
+      "digest": "3e684523176d066f7c61ac88cecef27f75e39d6800cfc2eda14eefc20bd1123e",
+      "changed_tables": [
+        "purchasing.vendor"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "the only vendor of product 937 is inactive",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the product itself is still sellable (not discontinued)",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "all historical PO lines for product 937 went to vendor 1638",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m01": {
+      "ok": true,
+      "digest": "799a607c79cc9009541bb068450395793db69d76d73f3b533182bb3725c6924d",
+      "changed_tables": [
+        "sales.customer",
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "customer 12961 is assigned to Southeast though its only address is in Oregon (Northwest)",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the April order is Northwest, the June order Southeast, both to the same address",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other order carries the territory of its customer",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m02": {
+      "ok": true,
+      "digest": "4d187f32f762e9a5b4d17eac84a7c81ae5e1811510ec45c5fdb4ba9e6cba102d",
+      "changed_tables": [
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "order 74509 is charged to a card that belongs to a different person",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "customer 14282 (person 11739) owns card 11266, used on its four other orders",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other card-paid order uses a card owned by its customer",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "prod-m03": {
+      "ok": true,
+      "digest": "a52f93b792a5e0a3caa59aba1829975181ab32f4f3a3438c406f54d9ee3505bf",
+      "changed_tables": [
+        "production.product",
+        "production.productlistpricehistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "product 877 has two open list price history rows",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the rows are 7.95 from 2024-05-29 and 8.95 from 2025-06-01; product list price is 8.95",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "June 2025 orders for 877 were charged 7.95",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other product has overlapping list price history rows",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "inv-m04": {
+      "ok": true,
+      "digest": "0a42534f163a20fd61a7e5135d12da9d6b6b62e39e71fc5e8b3a6c10bae90fd3",
+      "changed_tables": [
+        "production.transactionhistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "transaction 196618 records 300 units against an order line of 3",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "unique",
+          "description": "every other sales transaction quantity equals its order quantity, and none exceeds 41",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "purch-m05": {
+      "ok": true,
+      "digest": "90544c1093e1c1c63843f9c9407a0840a75ade110dfde65a59d2eb2dbc369852",
+      "changed_tables": [
+        "purchasing.purchaseorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "PO 3784 is for a product its vendor does not supply",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "Bicycle Specialists (1628) is the only supplier of 941 and received every other PO for it",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other PO line is for a product its vendor supplies",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m06": {
+      "ok": true,
+      "digest": "4408fc1b8007e8889e8dcf7f5c17928fb8030f757f7010e1823bfcbee8e77d78",
+      "changed_tables": [
+        "humanresources.employee",
+        "humanresources.employeedepartmenthistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "salesperson 288 is no longer a current employee and has no open department assignment",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "store 1020 is assigned to 288, and its April 2025 orders are credited to 288",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other employee is current",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m07": {
+      "ok": true,
+      "digest": "df9a44a452fbaa5f0b39976837db22f170c094f459cac2c081a0b5e26eb6255b",
+      "changed_tables": [
+        "sales.salesorderdetail",
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "line 102716 uses volume offer 5 (min 41) for 4 units",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "header subtotal reflects the discounted line",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other discounted volume-offer line is within the offer quantity range",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m08": {
+      "ok": true,
+      "digest": "cad91350f44b433a8fec1c2211e0e04cc2e05cebc1bcfa81653b49cb9ba5571f",
+      "changed_tables": [
+        "sales.salesorderdetail"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "orders 69391 and 69389 share one tracking number",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the two orders ship to different customers and addresses on the same date",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other tracking number spans two orders",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-m09": {
+      "ok": true,
+      "digest": "7c4db6f8ae5fe30d7286496fed5f24541c04ad4ce73c447aaf32ddc2326a3c01",
+      "changed_tables": [
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "order 75031 is paid by card without an approval code and is in process",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "unique",
+          "description": "every other order is shipped, and every other card-paid order has an approval code",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "the other orders of 2025-06-27 shipped on 2025-07-04",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "person-m10": {
+      "ok": true,
+      "digest": "2bce437ad023d8947e07325aad731d77f716d0a7ea3bcdc013ee40e29214ca90",
+      "changed_tables": [
+        "person.emailaddress"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "persons 6910 and 4128 share an email address",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "person 4128 is customer 13184, which placed order 72190 on 2025-05-04",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other email address is shared",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "hr-h01": {
+      "ok": true,
+      "digest": "dcd7369152b81d4f4cb1358c8a940534359e3739a6cf6a3651da90c4a4ed3dec",
+      "changed_tables": [
+        "humanresources.employee",
+        "humanresources.employeedepartmenthistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "employee 252 left Purchasing for Marketing on 2025-07-15",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "exactly 13 purchase orders dated 2025-07-15 or later list employee 252",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other purchase order was placed by someone in Purchasing on its order date",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "inv-h02": {
+      "ok": true,
+      "digest": "11f62fa2fc400f25ac1016ebea37f95ace401e13e5ab09795c92eb0eea8150d8",
+      "changed_tables": [
+        "production.transactionhistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "the receipt for PO 2829 is booked to product 511, which is not on the PO",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "PO 2829 received 550 HL Road Rims and has no receipt booked to product 512",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other receipt transaction is for a product on its purchase order",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "hr-h03": {
+      "ok": true,
+      "digest": "15025f8d7bfe5e82533ef0c9b139f9c9226fae50f28884d1d5be93fa82e69133",
+      "changed_tables": [
+        "humanresources.employee"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "employee 83 sits at /1/1/8/, under the Engineering Manager (/1/1/, employee 3)",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "employee 83 is still a WC40 production technician in Production; WC40 supervisors are 78, 127, 192",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "every other non-root node has a parent, and every other production technician reports to a production supervisor",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "prod-h04": {
+      "ok": true,
+      "digest": "6bca0f8b99bf6a71859d1a5c0e75f903857d3531e1fcd89f63a8480312adc071",
+      "changed_tables": [
+        "production.billofmaterials",
+        "production.workorder"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "from 2025-04-01 the BOM of 782 (size 38) uses frame 746 (size 46) instead of 747 (size 38)",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "every work order for 782 from 2025-04-01 is fully scrapped with reason 4; at most 1 unit was scrapped in Jan-Mar 2025",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "sibling Mountain-200 assemblies show no scrap spike after April 2025",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "in every other assembly the frame component size matches the assembly size",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-h05": {
+      "ok": true,
+      "digest": "30404c6824ec993e8e628099309dc408e5007e6418a4dde8096b0868bd55aae1",
+      "changed_tables": [
+        "sales.salesorderdetail",
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "order 53451 has two identical lines for product 953",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "only one shipment transaction (2 units) exists for product 953 on order 53451",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "the header subtotal includes both lines",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other order has two lines for the same product and special offer",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-h06": {
+      "ok": true,
+      "digest": "70932fafe533fa6d51aaf4b840d9199716673f549aecfb868e085d2430c4d01f",
+      "changed_tables": [
+        "sales.salesorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "UK order 73806 references a USD->JPY rate",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the UK uses GBP and the other UK orders of 2025-05-25 use rate 12376 (USD->GBP)",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "the order was not one of the pre-existing currency mismatches (base data has 43, none UK-to-JPY)",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-h07": {
+      "ok": true,
+      "digest": "32dc9acbf2b381e3226389c5a1268c324caaa13bafe2decf39c5588d1f675317",
+      "changed_tables": [
+        "sales.salesorderheader",
+        "sales.salesperson",
+        "sales.salesterritoryhistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "salesperson 276 is reassigned to Canada from 2025-02-01",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "orders of 276 since February are booked to Canada while their customers are Southwest customers",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no Canada customer is affected; the jump in Canada equals the orders moved",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "prod-h08": {
+      "ok": true,
+      "digest": "2486c7e0409bf6514cbd41f3cf9f3bd6924857fe00901b24f10dab194fc5c11c",
+      "changed_tables": [
+        "production.product",
+        "production.productcosthistory"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "product 707 standard cost is 130.863 from 2025-05-01, ten times its previous cost",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "the cost exceeds the list price, and the sibling helmets keep 13.0863",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "helmet list prices did not change in 2025 and no helmet discount applies in May-June 2025",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other product has a standard cost above its list price",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "purch-h09": {
+      "ok": true,
+      "digest": "5083e4966c452f16151139f2cd2a43ed617ca2eb3dcfd17c3ef07f9ce7207635",
+      "changed_tables": [
+        "purchasing.purchaseorderdetail",
+        "purchasing.purchaseorderheader"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "PO 4013 duplicates PO 3277 (vendor, buyer, date, totals, lines)",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "receipts exist for all six lines of 3277 and none for 4013",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "Norstan Bike Hut has no other duplicate purchase orders, and its other June 2025 POs all have receipts",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    },
+    "sales-h10": {
+      "ok": true,
+      "digest": "5bf18710cee48b6277cdb2f88d64fabf588be9df9cfc863b7d3a411a71041993",
+      "changed_tables": [
+        "sales.salesorderdetail",
+        "sales.salesorderheader",
+        "sales.specialoffer"
+      ],
+      "checks": [
+        {
+          "kind": "anomaly",
+          "description": "special offer 10 (50%, started 2024-05-13) is active until 2025-12-31 and was modified 2025-05-31",
+          "incident": true,
+          "base": false
+        },
+        {
+          "kind": "check",
+          "description": "every June 2025 online mountain-tire line uses offer 10 at 50%, and no line used it before June 2025",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "check",
+          "description": "tire list prices did not change in 2025",
+          "incident": true,
+          "base": null
+        },
+        {
+          "kind": "unique",
+          "description": "no other June 2025 online line is discounted",
+          "incident": true,
+          "base": null
+        }
+      ],
+      "problems": []
+    }
+  }
+}

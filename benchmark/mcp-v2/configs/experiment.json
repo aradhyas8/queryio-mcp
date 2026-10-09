@@ -1,0 +1,53 @@
+{
+  "agent": {
+    "executor": "codex",
+    "model": "gpt-5.6-terra",
+    "effort": "low",
+    "timeout_seconds": 1800,
+    "max_rate_limit_retries": 3
+  },
+  "grader": {
+    "executor": "codex",
+    "model": "gpt-6-luna",
+    "effort": "high",
+    "timeout_seconds": 600
+  },
+  "arms": [
+    "queryio",
+    "dbhub",
+    "postgres-mcp"
+  ],
+  "profiles": {
+    "smoke": {
+      "tasks": [
+        "sales-e01",
+        "purch-e02",
+        "sales-m02",
+        "inv-m04",
+        "inv-h02"
+      ],
+      "repetitions": 2
+    },
+    "full": {
+      "tasks": "all",
+      "repetitions": 5
+    },
+    "trial": {
+      "tasks": [
+        "sales-e01"
+      ],
+      "repetitions": 1
+    },
+    "codex-smoke": {
+      "tasks": [
+        "sales-e01",
+        "inv-m04",
+        "inv-h02"
+      ],
+      "repetitions": 1
+    }
+  },
+  "seed": 20261005,
+  "concurrency": 3,
+  "group_concurrency": 3
+}

@@ -1,0 +1,15 @@
+You have access to a PostgreSQL database through the provided database tools.
+
+Investigate the issue below.
+
+Determine the most likely root cause.
+
+Support your conclusion with specific evidence from the database.
+
+Continue investigating until you have enough evidence to give a confident answer.
+
+Do not modify the database.
+
+Issue:
+
+{{QUESTION}}

@@ -1,0 +1,42 @@
+# PostgreSQL for the MCP v2 benchmark (separate from the integration-test container on 54329).
+services:
+  postgres:
+    build:
+      context: ./.cache
+      dockerfile: ../adventureworks/Dockerfile
+    image: queryio-bench-aw:pg16.10
+    container_name: queryio-bench-aw
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "54330:5432"
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - logging_collector=on
+      - -c
+      - log_destination=jsonlog
+      - -c
+      - log_directory=log
+      - -c
+      - log_filename=postgresql-%Y%m%d_%H%M%S.log
+      - -c
+      - log_rotation_age=0
+      - -c
+      - log_rotation_size=0
+      - -c
+      - log_statement=all
+      - -c
+      - log_min_error_statement=error
+      - -c
+      - max_connections=200
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 60

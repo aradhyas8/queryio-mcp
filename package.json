@@ -35,7 +35,17 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && npm run build"
+    "prepack": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && npm run build",
+    "benchmark:mcp:setup": "node benchmark/mcp-v2/harness/setup.mjs",
+    "benchmark:mcp:validate": "node benchmark/mcp-v2/harness/validate.mjs",
+    "benchmark:mcp:probe": "node benchmark/mcp-v2/harness/probe.mjs",
+    "benchmark:mcp:smoke": "node benchmark/mcp-v2/harness/pipeline.mjs --profile smoke",
+    "benchmark:mcp:run": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
+    "benchmark:mcp": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
+    "benchmark:mcp:codex:smoke": "node benchmark/mcp-v2/harness/pipeline.mjs --profile codex-smoke",
+    "benchmark:mcp:codex": "node benchmark/mcp-v2/harness/pipeline.mjs --profile full",
+    "benchmark:mcp:grade": "node benchmark/mcp-v2/harness/grader.mjs",
+    "benchmark:mcp:report": "node benchmark/mcp-v2/harness/report.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

@@ -1,0 +1,28 @@
+You are grading one answer to a database investigation task. An investigator was given the issue below and access to the database, and wrote the answer below. You also have the verified ground truth. Judge the answer only against the ground truth. Do not reward length, confidence, formatting, or effort, and do not penalize the investigator's choice of method.
+
+ISSUE GIVEN TO THE INVESTIGATOR:
+{{QUESTION}}
+
+GROUND TRUTH ROOT CAUSE:
+{{ROOT_CAUSE}}
+
+REQUIRED SUPPORTING FACTS:
+{{REQUIRED_FACTS}}
+
+PLAUSIBLE BUT WRONG EXPLANATIONS (answers that settle on these are wrong):
+{{NOT_ROOT_CAUSE}}
+
+ANSWER TO GRADE (tool names, if any, have been replaced with [tool]):
+<answer>
+{{ANSWER}}
+</answer>
+
+Grade it:
+- root_cause_correct: true only if the answer identifies the ground-truth root cause in substance (the specific inconsistent record(s) and what is wrong with them). Different wording is fine. Naming the right records but blaming a different cause is not correct.
+- verdict:
+  - "correct": root_cause_correct is true and the answer does not commit to a materially different primary cause.
+  - "partial": the answer finds the anomalous record(s) or part of the root cause but misses or misstates an essential part, or lists the true cause only as one of several unranked possibilities.
+  - "wrong": anything else, including no answer, a refusal, or a wrong primary cause.
+- required_facts: for each required fact, in order, whether the answer states it (or an equivalent) correctly.
+- unsupported_or_incorrect_claims: factual claims in the answer that contradict the ground truth or are not supported (for example invented values or records). Empty if none.
+- rationale: two or three sentences.
